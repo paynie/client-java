@@ -21,7 +21,7 @@ if [ -d $proto_dir ]; then
 fi
 
 repos=("https://github.com/paynie/kvproto" "https://github.com/pingcap/raft-rs" "https://github.com/pingcap/tipb")
-commits=(a7eaa13f82672f4126f2e367770354633d92693f b9891b673573fad77ebcf9bbe0969cf945841926 c4d518eb1d60c21f05b028b36729e64610346dac)
+commits=(d88b379 b9891b673573fad77ebcf9bbe0969cf945841926 c4d518eb1d60c21f05b028b36729e64610346dac)
 
 for i in "${!repos[@]}"; do 
 	repo_name=$(basename ${repos[$i]})
