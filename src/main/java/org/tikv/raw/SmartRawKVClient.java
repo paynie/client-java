@@ -27,6 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.tikv.common.TiSession;
 import org.tikv.common.exception.CircuitBreakerOpenException;
+import org.tikv.common.region.RawCASUseVersionResponse;
 import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
@@ -104,6 +105,18 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public RawCASUseVersionResponse compareAndSetUseVersion(
+      ByteString key, Optional<Long> prevValue, ByteString value) {
+    return null;
+  }
+
+  @Override
+  public RawCASUseVersionResponse compareAndSetUseVersion(
+      ByteString key, Optional<Long> prevVersion, ByteString value, long ttl) {
+    return null;
+  }
+
+  @Override
   public void batchPut(Map<ByteString, ByteString> kvPairs) {
     callWithCircuitBreaker("batchPut", () -> client.batchPut(kvPairs));
   }
@@ -132,6 +145,9 @@ public class SmartRawKVClient implements RawKVClientBase {
   public Optional<Long> getKeyTTL(ByteString key) {
     return callWithCircuitBreaker("getKeyTTL", () -> client.getKeyTTL(key));
   }
+
+  @Override
+  public void setKeyTTL(ByteString key, long ttl) {}
 
   @Override
   public List<List<ByteString>> batchScanKeys(

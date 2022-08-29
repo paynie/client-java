@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.tikv.common.TiSession;
+import org.tikv.common.region.RawCASUseVersionResponse;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
 import org.tikv.kvproto.Kvrpcpb;
@@ -98,6 +99,39 @@ public interface RawKVClientBase extends AutoCloseable {
   void compareAndSet(ByteString key, Optional<ByteString> prevValue, ByteString value, long ttl);
 
   /**
+   * Cas operation use value version to reduce network transform: If current version in tikv server
+   * == preVersion, means cas success, <key, new value> will be written and the version in tikv
+   * server will be updated by increase 1; Otherwrise, cas will be failed, no data update and return
+   * current version in tikv server.
+   *
+   * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
+   *
+   * @param key key
+   * @param prevVersion current version of value
+   * @param value new value
+   * @return cas result: cas result and current value version
+   */
+  RawCASUseVersionResponse compareAndSetUseVersion(
+      ByteString key, Optional<Long> prevVersion, ByteString value);
+
+  /**
+   * Cas operation use value version to reduce network transform: If current version in tikv server
+   * == preVersion, means cas success, <key, new value> will be written and the version in tikv
+   * server will be updated by increase 1; Otherwrise, cas will be failed, no data update and return
+   * current version in tikv server.
+   *
+   * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
+   *
+   * @param key key
+   * @param prevVersion current version of value
+   * @param value new value
+   * @param ttl data ttl
+   * @return cas result: cas result and current value version
+   */
+  RawCASUseVersionResponse compareAndSetUseVersion(
+      ByteString key, Optional<Long> prevVersion, ByteString value, long ttl);
+
+  /**
    * Put a set of raw key-value pair to TiKV.
    *
    * @param kvPairs kvPairs
@@ -143,6 +177,15 @@ public interface RawKVClientBase extends AutoCloseable {
    *     exists. - ttl=0 if the key will never be outdated. - ttl=null if the key does not exist
    */
   Optional<Long> getKeyTTL(ByteString key);
+
+  /**
+   * Get the TTL of a raw key from TiKV if key exists
+   *
+   * @param key raw key
+   * @return a Long indicating the TTL of key ttl is a non-null long value indicating TTL if key
+   *     exists. - ttl=0 if the key will never be outdated. - ttl=null if the key does not exist
+   */
+  void setKeyTTL(ByteString key, long ttl);
 
   /**
    * Create a new `batch scan` request with `keyOnly` option Once resolved this request will result

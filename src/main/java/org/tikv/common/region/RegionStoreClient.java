@@ -70,6 +70,7 @@ import org.tikv.common.util.ConcreteBackOffer;
 import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.RangeSplitter;
+import org.tikv.kvproto.*;
 import org.tikv.kvproto.Coprocessor;
 import org.tikv.kvproto.Errorpb;
 import org.tikv.kvproto.Kvrpcpb.BatchGetRequest;
@@ -103,6 +104,8 @@ import org.tikv.kvproto.Kvrpcpb.RawPutRequest;
 import org.tikv.kvproto.Kvrpcpb.RawPutResponse;
 import org.tikv.kvproto.Kvrpcpb.RawScanRequest;
 import org.tikv.kvproto.Kvrpcpb.RawScanResponse;
+import org.tikv.kvproto.Kvrpcpb.RawSetKeyTTLRequest;
+import org.tikv.kvproto.Kvrpcpb.RawSetKeyTTLResponse;
 import org.tikv.kvproto.Kvrpcpb.ScanRequest;
 import org.tikv.kvproto.Kvrpcpb.ScanResponse;
 import org.tikv.kvproto.Kvrpcpb.SplitRegionRequest;
@@ -946,6 +949,45 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
     return Optional.of(resp.getTtl());
   }
 
+  public void rawSetKeyTTL(BackOffer backOffer, ByteString key, long ttl) {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY
+            .labels("client_grpc_raw_set_key_ttl", clusterId.toString())
+            .startTimer();
+    try {
+      Supplier<RawSetKeyTTLRequest> factory =
+          () ->
+              RawSetKeyTTLRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .setKey(codec.encodeKey(key))
+                  .setTtl(ttl)
+                  .build();
+      RegionErrorHandler<RawSetKeyTTLResponse> handler =
+          new RegionErrorHandler<>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      RawSetKeyTTLResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawSetKeyTTLMethod(), factory, handler);
+      rawSetKeyTTLHelper(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  private void rawSetKeyTTLHelper(RawSetKeyTTLResponse resp) {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawSetTTLResponse failed without a cause");
+    }
+    String error = resp.getError();
+    if (!error.isEmpty()) {
+      throw new KeyException(resp.getError());
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+  }
+
   public void rawDelete(BackOffer backOffer, ByteString key, boolean atomicForCAS) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
@@ -1083,6 +1125,163 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
             key, expectedPrevValue, Optional.of(resp.getPreviousValue()));
       }
     }
+  }
+
+  private ByteString encode(Optional<Long> versionOpt) {
+    if (!versionOpt.isPresent()) {
+      return ByteString.EMPTY;
+    } else {
+      return ByteString.copyFrom(longToByteLittle(versionOpt.get()));
+    }
+  }
+
+  public static byte[] longToByteLittle(long n) {
+    byte[] b = new byte[8];
+    b[0] = (byte) (n & 0xff);
+    b[1] = (byte) (n >> 8 & 0xff);
+    b[2] = (byte) (n >> 16 & 0xff);
+    b[3] = (byte) (n >> 24 & 0xff);
+    b[4] = (byte) (n >> 32 & 0xff);
+    b[5] = (byte) (n >> 40 & 0xff);
+    b[6] = (byte) (n >> 48 & 0xff);
+    b[7] = (byte) (n >> 56 & 0xff);
+    return b;
+  }
+
+  public static final String bytesToHexString(byte[] bArray) {
+    StringBuffer sb = new StringBuffer(bArray.length);
+    String sTemp;
+    for (int i = 0; i < bArray.length; i++) {
+      sTemp = Integer.toHexString(0xFF & bArray[i]);
+      if (sTemp.length() < 2) sb.append(0);
+      sb.append(sTemp.toUpperCase());
+    }
+    return sb.toString();
+  }
+
+  public static long littleBytesToLong(byte[] bytes) {
+    long n = 0;
+    n += bytes[0] & 0xff;
+    n += ((long) (bytes[1] & 0xff)) << 8;
+    n += ((long) (bytes[2] & 0xff)) << 16;
+    n += ((long) (bytes[3] & 0xff)) << 24;
+    n += ((long) (bytes[4] & 0xff)) << 32;
+    n += ((long) (bytes[5] & 0xff)) << 40;
+    n += ((long) (bytes[6] & 0xff)) << 48;
+    n += ((long) (bytes[7] & 0xff)) << 56;
+    return n;
+  }
+
+  public static void main(String[] args) {
+    System.out.println(littleBytesToLong(longToByteLittle(123456789)));
+    long t = 0xff;
+    System.out.println("t = " + t);
+  }
+
+  public RawCASUseVersionResponse rawCompareAndSetUseVersion(
+      BackOffer backOffer, ByteString key, Optional<Long> prevVersion, ByteString value, long ttl)
+      throws RawCASConflictException {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY
+            .labels("client_grpc_raw_put_if_absent_use_version", clusterId.toString())
+            .startTimer();
+    try {
+      Supplier<RawCASRequest> factory =
+          () ->
+              RawCASRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .setKey(key)
+                  .setValue(value)
+                  .setPreviousValue(encode(prevVersion))
+                  .setPreviousNotExist(!prevVersion.isPresent())
+                  .setTtl(ttl)
+                  .build();
+
+      RegionErrorHandler<RawCASResponse> handler =
+          new RegionErrorHandler<RawCASResponse>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      RawCASResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawCompareAndSwapMethod(), factory, handler);
+      return rawCompareAndSetHelperUseVersion(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  private RawCASUseVersionResponse rawCompareAndSetHelperUseVersion(RawCASResponse resp)
+      throws RawCASConflictException {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawCASResponse failed without a cause");
+    }
+    String error = resp.getError();
+    if (!error.isEmpty()) {
+      throw new KeyException(resp.getError());
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+
+    ByteString currentVersion = resp.getPreviousValue();
+    long version = 0;
+    if (currentVersion.isEmpty()) {
+      // Current version is empty
+    } else {
+      version = littleBytesToLong(currentVersion.toByteArray());
+    }
+
+    return new RawCASUseVersionResponse(resp.getSucceed(), version);
+  }
+
+  /**
+   * @param backOffer
+   * @return
+   */
+  public ByteString rawCoprocessor(
+      BackOffer backOffer,
+      String coporName,
+      String version,
+      ByteString serializedParams,
+      List<Kvrpcpb.KeyRange> ranges) {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY.labels("client_coprocessor", clusterId.toString()).startTimer();
+    try {
+      Supplier<Kvrpcpb.RawCoprocessorRequest> factory =
+          () ->
+              Kvrpcpb.RawCoprocessorRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .setCoprName(coporName)
+                  .setCoprVersionReq(version)
+                  .setData(serializedParams)
+                  .addAllRanges(ranges)
+                  .build();
+
+      RegionErrorHandler<Kvrpcpb.RawCoprocessorResponse> handler =
+          new RegionErrorHandler<>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      Kvrpcpb.RawCoprocessorResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawCoprocessorMethod(), factory, handler);
+      return rawCoprocessorHelper(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  private ByteString rawCoprocessorHelper(Kvrpcpb.RawCoprocessorResponse resp) {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawScanResponse failed without a cause");
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+
+    if (resp.getError() != null && !resp.getError().isEmpty()) {
+      throw new TiKVException("Corpocessor handle failed " + resp.getError());
+    }
+    return resp.getData();
   }
 
   public List<KvPair> rawBatchGet(BackOffer backoffer, List<ByteString> keys) {
