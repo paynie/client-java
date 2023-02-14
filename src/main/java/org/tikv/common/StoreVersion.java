@@ -28,7 +28,7 @@ import org.tikv.kvproto.Metapb;
 
 public class StoreVersion {
   private static final int SCALE = 10000;
-  private final Logger logger = LoggerFactory.getLogger(this.getClass());
+  private static final Logger logger = LoggerFactory.getLogger(StoreVersion.class);
   private int v0 = 9999;
   private int v1 = 9999;
   private int v2 = 9999;

@@ -1241,30 +1241,49 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @return KvPair list
    */
   public List<KvPair> rawScan(BackOffer backOffer, ByteString key, int limit, boolean keyOnly) {
+    return rawScan(backOffer, key, ByteString.EMPTY, limit, keyOnly);
+  }
+
+  /**
+   * Return a batch KvPair list containing limited key-value pairs starting from `key`, which are in
+   * the same region
+   *
+   * @param backOffer BackOffer
+   * @param start startKey
+   * @param end endKey
+   * @param keyOnly true if value of KvPair is not needed
+   * @return KvPair list
+   */
+  public List<KvPair> rawScan(BackOffer backOffer, ByteString start, ByteString end, int limit, boolean keyOnly) {
+    ByteString rangeEnd = end;
+    if(end == null) {
+      rangeEnd = ByteString.EMPTY;
+    }
+
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
-        GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_scan", clusterId.toString()).startTimer();
+            GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_scan", clusterId.toString()).startTimer();
     try {
       Supplier<RawScanRequest> factory =
-          () -> {
-            Pair<ByteString, ByteString> range = codec.encodeRange(key, ByteString.EMPTY);
-            return RawScanRequest.newBuilder()
-                .setContext(makeContext(storeType, backOffer.getSlowLog()))
-                .setStartKey(range.first)
-                .setEndKey(range.second)
-                .setKeyOnly(keyOnly)
-                .setLimit(limit)
-                .build();
-          };
+              () -> {
+                Pair<ByteString, ByteString> range = codec.encodeRange(start, rangeEnd);
+                return RawScanRequest.newBuilder()
+                        .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                        .setStartKey(range.first)
+                        .setEndKey(range.second)
+                        .setKeyOnly(keyOnly)
+                        .setLimit(limit)
+                        .build();
+              };
 
       RegionErrorHandler<RawScanResponse> handler =
-          new RegionErrorHandler<RawScanResponse>(
-              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+              new RegionErrorHandler<RawScanResponse>(
+                      regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
       RawScanResponse resp =
-          callWithRetry(backOffer, TikvGrpc.getRawScanMethod(), factory, handler);
+              callWithRetry(backOffer, TikvGrpc.getRawScanMethod(), factory, handler);
       // RegionErrorHandler may refresh region cache due to outdated region info,
       // This region need to get newest info from cache.
-      region = regionManager.getRegionByKey(key, backOffer);
+      region = regionManager.getRegionByKey(start, backOffer);
       return rawScanHelper(resp);
     } finally {
       requestTimer.observeDuration();

@@ -45,7 +45,7 @@ public abstract class AbstractGRPCClient<
         BlockingStubT extends AbstractStub<BlockingStubT>,
         FutureStubT extends AbstractFutureStub<FutureStubT>>
     implements AutoCloseable {
-  protected final Logger logger = LoggerFactory.getLogger(this.getClass());
+  protected static final Logger logger = LoggerFactory.getLogger(AbstractGRPCClient.class);
   protected final ChannelFactory channelFactory;
   protected TiConfiguration conf;
   protected long timeout;

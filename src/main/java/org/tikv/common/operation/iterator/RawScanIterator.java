@@ -56,7 +56,7 @@ public class RawScanIterator extends ScanIterator {
           currentCache = null;
         } else {
           try {
-            currentCache = client.rawScan(backOffer, startKey, limit, keyOnly);
+            currentCache = client.rawScan(backOffer, startKey, endKey.toByteString(), limit, keyOnly);
             // Client will get the newest region during scan. So we need to
             // update region after scan.
             region = client.getRegion();

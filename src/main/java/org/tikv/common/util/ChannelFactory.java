@@ -20,6 +20,7 @@ package org.tikv.common.util;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.GrpcSslContexts;
 import io.grpc.netty.NettyChannelBuilder;
 import io.netty.handler.ssl.SslContext;
@@ -34,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -47,6 +49,10 @@ import org.tikv.common.pd.PDUtils;
 
 public class ChannelFactory implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(ChannelFactory.class);
+
+  private static final int CHANNEL_SIZE =
+          Integer.valueOf(System.getProperty("tikv_channel_size", "1"));
+
   private static final String PUB_KEY_INFRA = "PKIX";
 
   // After `connRecycleTime` seconds elapses, the old channels will be forced to shut down,
@@ -59,8 +65,10 @@ public class ChannelFactory implements AutoCloseable {
   private final CertContext certContext;
   private final CertWatcher certWatcher;
 
-  @VisibleForTesting
-  public final ConcurrentHashMap<String, ManagedChannel> connPool = new ConcurrentHashMap<>();
+
+  private final AtomicLong counter = new AtomicLong();
+  private final ConcurrentHashMap<String, List<ManagedChannel>> connPool =
+          new ConcurrentHashMap<>();
 
   private final AtomicReference<SslContextBuilder> sslContextBuilder = new AtomicReference<>();
 
@@ -293,16 +301,63 @@ public class ChannelFactory implements AutoCloseable {
   }
 
   public ManagedChannel getChannel(String address, HostMapping mapping) {
-    if (certContext != null) {
-      try {
-        lock.readLock().lock();
-        return connPool.computeIfAbsent(
-            address, key -> createChannel(sslContextBuilder.get(), address, mapping));
-      } finally {
-        lock.readLock().unlock();
-      }
+    return connPool
+            .computeIfAbsent(
+                    address,
+                    key -> {
+                      List<ManagedChannel> channels = new ArrayList();
+                      for (int i = 0; i < CHANNEL_SIZE; i++) {
+                        channels.add(initChannel(address, mapping));
+                      }
+                      return channels;
+                    })
+            .get((int) (counter.incrementAndGet() % CHANNEL_SIZE));
+  }
+
+  private ManagedChannel initChannel(String addressStr, HostMapping hostMapping) {
+    URI address;
+    URI mappedAddr;
+    try {
+      address = PDUtils.addrToUri(addressStr);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("failed to form address " + addressStr, e);
     }
-    return connPool.computeIfAbsent(address, key -> createChannel(null, address, mapping));
+    try {
+      mappedAddr = hostMapping.getMappedURI(address);
+    } catch (Exception e) {
+      throw new IllegalArgumentException("failed to get mapped address " + address, e);
+    }
+
+    // Channel should be lazy without actual connection until first call
+    // So a coarse grain lock is ok here
+    SslContextBuilder sslContextBuilderItem = sslContextBuilder.get();
+    if (sslContextBuilderItem == null) {
+      ManagedChannelBuilder builder =
+              ManagedChannelBuilder.forAddress(mappedAddr.getHost(), mappedAddr.getPort())
+                      .maxInboundMessageSize(maxFrameSize)
+                      .keepAliveTime(keepaliveTime, TimeUnit.SECONDS)
+                      .keepAliveTimeout(keepaliveTimeout, TimeUnit.SECONDS)
+                      .keepAliveWithoutCalls(true)
+                      .idleTimeout(60, TimeUnit.SECONDS);
+      return builder.usePlaintext().build();
+    } else {
+      NettyChannelBuilder builder =
+              NettyChannelBuilder.forAddress(mappedAddr.getHost(), mappedAddr.getPort())
+                      .maxInboundMessageSize(maxFrameSize)
+                      .keepAliveTime(keepaliveTime, TimeUnit.SECONDS)
+                      .keepAliveTimeout(keepaliveTimeout, TimeUnit.SECONDS)
+                      .keepAliveWithoutCalls(true)
+                      .idleTimeout(60, TimeUnit.SECONDS);
+
+      SslContext sslContext;
+      try {
+        sslContext = sslContextBuilderItem.build();
+      } catch (SSLException e) {
+        logger.error("create ssl context failed!", e);
+        return null;
+      }
+      return builder.sslContext(sslContext).build();
+    }
   }
 
   private ManagedChannel createChannel(
@@ -358,9 +413,7 @@ public class ChannelFactory implements AutoCloseable {
   }
 
   public void close() {
-    for (ManagedChannel ch : connPool.values()) {
-      ch.shutdown();
-    }
+    connPool.values().forEach(chs -> chs.forEach(ch -> ch.shutdown()));
     connPool.clear();
 
     if (recycler != null) {
