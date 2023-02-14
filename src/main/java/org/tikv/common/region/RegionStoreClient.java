@@ -1255,17 +1255,17 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @return KvPair list
    */
   public List<KvPair> rawScan(BackOffer backOffer, ByteString start, ByteString end, int limit, boolean keyOnly) {
-    ByteString rangeEnd = end;
-    if(end == null) {
-      rangeEnd = ByteString.EMPTY;
-    }
-
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
             GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_scan", clusterId.toString()).startTimer();
     try {
       Supplier<RawScanRequest> factory =
               () -> {
+                ByteString rangeEnd = end;
+                if(end == null) {
+                  rangeEnd = ByteString.EMPTY;
+                }
+
                 Pair<ByteString, ByteString> range = codec.encodeRange(start, rangeEnd);
                 return RawScanRequest.newBuilder()
                         .setContext(makeContext(storeType, backOffer.getSlowLog()))
