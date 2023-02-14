@@ -291,8 +291,11 @@ public class ChannelFactory implements AutoCloseable {
       lock.writeLock().lock();
       sslContextBuilder.set(newBuilder);
 
-      List<ManagedChannel> pending = new ArrayList<>(connPool.values());
-      recycler.schedule(() -> cleanExpiredConn(pending), connRecycleTime, TimeUnit.SECONDS);
+      //List<ManagedChannel> pending = new ArrayList<>(connPool.values());
+      connPool.values().forEach(subPools -> {
+        recycler.schedule(() -> cleanExpiredConn(subPools), connRecycleTime, TimeUnit.SECONDS);
+      });
+      //recycler.schedule(() -> cleanExpiredConn(pending), connRecycleTime, TimeUnit.SECONDS);
 
       connPool.clear();
     } finally {
