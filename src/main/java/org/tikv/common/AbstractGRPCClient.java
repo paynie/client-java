@@ -45,7 +45,7 @@ public abstract class AbstractGRPCClient<
         BlockingStubT extends AbstractStub<BlockingStubT>,
         FutureStubT extends AbstractFutureStub<FutureStubT>>
     implements AutoCloseable {
-  protected final Logger logger = LoggerFactory.getLogger(this.getClass());
+  protected static final Logger logger = LoggerFactory.getLogger(AbstractGRPCClient.class);
   protected final ChannelFactory channelFactory;
   protected TiConfiguration conf;
   protected long timeout;
@@ -193,13 +193,17 @@ public abstract class AbstractGRPCClient<
         HealthCheckResponse resp = stub.check(req);
         return resp.getStatus() == HealthCheckResponse.ServingStatus.SERVING;
       } catch (Exception e) {
-        logger.warn("check health failed.", e);
+        logger.warn("check health failed, addr: {}, caused by: {}", addressStr, e.getMessage());
         backOffer.doBackOff(BackOffFuncType.BoCheckHealth, e);
       }
     }
   }
 
   protected boolean checkHealth(BackOffer backOffer, String addressStr, HostMapping hostMapping) {
-    return doCheckHealth(backOffer, addressStr, hostMapping);
+    try {
+      return doCheckHealth(backOffer, addressStr, hostMapping);
+    } catch (Exception e) {
+      return false;
+    }
   }
 }
