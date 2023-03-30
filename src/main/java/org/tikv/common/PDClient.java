@@ -612,7 +612,7 @@ public class PDClient extends AbstractGRPCClient<PDBlockingStub, PDFutureStub>
   }
 
   public void tryUpdateLeader() {
-    logger.info("try update leader");
+    logger.debug("try update leader");
     for (URI url : this.pdAddrs) {
       BackOffer backOffer = this.probeBackOffer();
       // since resp is null, we need update leader's address by walking through all pd server.
