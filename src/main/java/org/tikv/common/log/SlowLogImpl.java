@@ -131,8 +131,10 @@ public class SlowLogImpl implements SlowLog {
     }
 
     JsonArray jsonArray = new JsonArray();
-    for (SlowLogSpan slowLogSpan : slowLogSpans) {
-      jsonArray.add(slowLogSpan.toJsonElement());
+    synchronized (this) {
+      for (SlowLogSpan slowLogSpan : slowLogSpans) {
+        jsonArray.add(slowLogSpan.toJsonElement());
+      }
     }
     jsonObject.add("spans", jsonArray);
 
