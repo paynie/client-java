@@ -18,11 +18,13 @@
 package org.tikv.raw;
 
 import static org.tikv.common.util.ClientUtils.appendBatches;
+import static org.tikv.common.util.ClientUtils.appendWriteBatches;
 import static org.tikv.common.util.ClientUtils.genUUID;
 import static org.tikv.common.util.ClientUtils.getBatches;
 import static org.tikv.common.util.ClientUtils.getTasks;
 import static org.tikv.common.util.ClientUtils.getTasksWithOutput;
 import static org.tikv.common.util.ClientUtils.groupKeysByRegion;
+import static org.tikv.common.util.ClientUtils.groupWriteOpsByRegion;
 
 import com.google.protobuf.ByteString;
 import io.prometheus.client.Counter;
@@ -70,7 +72,9 @@ import org.tikv.common.util.DeleteRange;
 import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
+import org.tikv.common.util.WriteBatch;
 import org.tikv.kvproto.Kvrpcpb.KvPair;
+import org.tikv.kvproto.Kvrpcpb.WriteOp;
 
 public class RawKVClient implements RawKVClientBase {
   private final Long clusterId;
@@ -271,6 +275,33 @@ public class RawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void batchWrite(List<WriteOp> batch, long ttl) {
+    String[] labels = withClusterId("client_raw_batch_put");
+    Histogram.Timer requestTimer = RAW_REQUEST_LATENCY.labels(labels).startTimer();
+
+    SlowLog slowLog = withClusterInfo(new SlowLogImpl(conf.getRawKVBatchWriteSlowLogInMS()));
+    SlowLogSpan span = slowLog.start("batchWrite");
+    span.addProperty("keySize", String.valueOf(batch.size()));
+
+    ConcreteBackOffer backOffer =
+        ConcreteBackOffer.newDeadlineBackOff(
+            conf.getRawKVBatchWriteTimeoutInMS(), slowLog, clusterId);
+    try {
+      long deadline = System.currentTimeMillis() + conf.getRawKVBatchWriteTimeoutInMS();
+      doSendBatchWrite(backOffer, batch, ttl, deadline);
+      RAW_REQUEST_SUCCESS.labels(labels).inc();
+    } catch (Exception e) {
+      RAW_REQUEST_FAILURE.labels(labels).inc();
+      slowLog.setError(e);
+      throw e;
+    } finally {
+      requestTimer.observeDuration();
+      span.end();
+      slowLog.log();
+    }
+  }
+
+  @Override
   public Optional<ByteString> get(ByteString key) {
     String[] labels = withClusterId("client_raw_get");
     Histogram.Timer requestTimer = RAW_REQUEST_LATENCY.labels(labels).startTimer();
@@ -374,6 +405,38 @@ public class RawKVClient implements RawKVClientBase {
         } catch (final TiKVException e) {
           backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
           logger.warn("Retry for getKeyTTL error", e);
+        }
+      }
+    } catch (Exception e) {
+      RAW_REQUEST_FAILURE.labels(labels).inc();
+      slowLog.setError(e);
+      throw e;
+    } finally {
+      requestTimer.observeDuration();
+      span.end();
+      slowLog.log();
+    }
+  }
+
+  @Override
+  public void setKeyTTL(ByteString key, long ttl) {
+    String[] labels = withClusterId("client_raw_set_key_ttl");
+    Histogram.Timer requestTimer = RAW_REQUEST_LATENCY.labels(labels).startTimer();
+    SlowLog slowLog = withClusterInfo(new SlowLogImpl(conf.getRawKVReadSlowLogInMS()));
+    SlowLogSpan span = slowLog.start("setKeyTTL");
+    span.addProperty("key", KeyUtils.formatBytesUTF8(key));
+    ConcreteBackOffer backOffer =
+        ConcreteBackOffer.newDeadlineBackOff(conf.getRawKVReadTimeoutInMS(), slowLog, clusterId);
+    try {
+      while (true) {
+        try (RegionStoreClient client = clientBuilder.build(key, backOffer)) {
+          span.addProperty("region", client.getRegion().toString());
+          client.rawSetKeyTTL(backOffer, key, ttl);
+          RAW_REQUEST_SUCCESS.labels(labels).inc();
+          return;
+        } catch (final TiKVException e) {
+          backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
+          logger.warn("Retry for setKeyTTL error", e);
         }
       }
     } catch (Exception e) {
@@ -765,6 +828,49 @@ public class RawKVClient implements RawKVClientBase {
     }
   }
 
+  private void doSendBatchWrite(BackOffer backOffer, List<WriteOp> batch, long ttl, long deadline) {
+    ExecutorCompletionService<List<WriteBatch>> completionService =
+        new ExecutorCompletionService<>(batchPutThreadPool);
+
+    List<Future<List<WriteBatch>>> futureList = new ArrayList<>();
+
+    Map<TiRegion, List<WriteOp>> groupKeys =
+        groupWriteOpsByRegion(clientBuilder.getRegionManager(), batch, backOffer);
+    List<WriteBatch> batches = new ArrayList<>();
+
+    for (Map.Entry<TiRegion, List<WriteOp>> entry : groupKeys.entrySet()) {
+      appendWriteBatches(
+          backOffer,
+          batches,
+          entry.getKey(),
+          entry.getValue(),
+          RAW_BATCH_WRITE_SIZE,
+          MAX_RAW_BATCH_LIMIT);
+    }
+    Queue<List<WriteBatch>> taskQueue = new LinkedList<>();
+    taskQueue.offer(batches);
+
+    while (!taskQueue.isEmpty()) {
+      List<WriteBatch> task = taskQueue.poll();
+      for (WriteBatch writeBatch : task) {
+        futureList.add(
+            completionService.submit(
+                () ->
+                    doSendBatchWriteInBatchesWithRetry(
+                        writeBatch.getBackOffer(), writeBatch, ttl)));
+      }
+
+      try {
+        getTasks(completionService, taskQueue, task, deadline - System.currentTimeMillis());
+      } catch (Exception e) {
+        for (Future<List<WriteBatch>> future : futureList) {
+          future.cancel(true);
+        }
+        throw e;
+      }
+    }
+  }
+
   private List<Batch> doSendBatchPutInBatchesWithRetry(BackOffer backOffer, Batch batch, long ttl) {
     try (RegionStoreClient client = clientBuilder.build(batch.getRegion(), backOffer)) {
       client.setTimeout(conf.getRawKVBatchWriteTimeoutInMS());
@@ -776,6 +882,21 @@ public class RawKVClient implements RawKVClientBase {
       logger.warn("ReSplitting ranges for BatchPutRequest", e);
       // retry
       return doSendBatchPutWithRefetchRegion(backOffer, batch);
+    }
+  }
+
+  private List<WriteBatch> doSendBatchWriteInBatchesWithRetry(
+      BackOffer backOffer, WriteBatch batch, long ttl) {
+    try (RegionStoreClient client = clientBuilder.build(batch.getRegion(), backOffer)) {
+      client.setTimeout(conf.getRawKVBatchWriteTimeoutInMS());
+      client.rawBatchWrite(backOffer, batch, ttl, atomicForCAS);
+      return new ArrayList<>();
+    } catch (final TiKVException e) {
+      // TODO: any elegant way to re-split the ranges if fails?
+      backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
+      logger.warn("ReSplitting ranges for BatchWriteRequest", e);
+      // retry
+      return doSendBatchWriteWithRefetchRegion(backOffer, batch);
     }
   }
 
@@ -792,6 +913,25 @@ public class RawKVClient implements RawKVClientBase {
           entry.getValue(),
           entry.getValue().stream().map(batch.getMap()::get).collect(Collectors.toList()),
           RAW_BATCH_PUT_SIZE,
+          MAX_RAW_BATCH_LIMIT);
+    }
+
+    return retryBatches;
+  }
+
+  private List<WriteBatch> doSendBatchWriteWithRefetchRegion(
+      BackOffer backOffer, WriteBatch batch) {
+    Map<TiRegion, List<WriteOp>> groupKeys =
+        groupWriteOpsByRegion(clientBuilder.getRegionManager(), batch.getWriteOps(), backOffer);
+    List<WriteBatch> retryBatches = new ArrayList<>();
+
+    for (Map.Entry<TiRegion, List<WriteOp>> entry : groupKeys.entrySet()) {
+      appendWriteBatches(
+          backOffer,
+          retryBatches,
+          entry.getKey(),
+          entry.getValue(),
+          RAW_BATCH_WRITE_SIZE,
           MAX_RAW_BATCH_LIMIT);
     }
 

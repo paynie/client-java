@@ -25,12 +25,14 @@ import org.tikv.common.TiSession;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
 import org.tikv.kvproto.Kvrpcpb;
+import org.tikv.kvproto.Kvrpcpb.WriteOp;
 
 public interface RawKVClientBase extends AutoCloseable {
   // https://www.github.com/pingcap/tidb/blob/master/store/tikv/rawkv.go
   int MAX_RAW_SCAN_LIMIT = 10240;
   int MAX_RAW_BATCH_LIMIT = 1024;
   int RAW_BATCH_PUT_SIZE = 1024 * 1024;
+  int RAW_BATCH_WRITE_SIZE = 1024 * 1024;
   int RAW_BATCH_GET_SIZE = 16 * 1024;
   int RAW_BATCH_DELETE_SIZE = 16 * 1024;
 
@@ -113,6 +115,14 @@ public interface RawKVClientBase extends AutoCloseable {
   void batchPut(Map<ByteString, ByteString> kvPairs, long ttl);
 
   /**
+   * Put a set of raw key-value pair to TiKV.
+   *
+   * @param batch batch
+   * @param ttl the TTL of keys to be put (in seconds), 0 means the keys will never be outdated
+   */
+  void batchWrite(List<WriteOp> batch, long ttl);
+
+  /**
    * Get a raw key-value pair from TiKV if key exists
    *
    * @param key raw key
@@ -143,6 +153,14 @@ public interface RawKVClientBase extends AutoCloseable {
    *     exists. - ttl=0 if the key will never be outdated. - ttl=null if the key does not exist
    */
   Optional<Long> getKeyTTL(ByteString key);
+
+  /**
+   * Set key TTL
+   *
+   * @param key raw key
+   * @param ttl time to live
+   */
+  void setKeyTTL(ByteString key, long ttl);
 
   /**
    * Create a new `batch scan` request with `keyOnly` option Once resolved this request will result

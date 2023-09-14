@@ -29,6 +29,8 @@ import org.tikv.common.region.RegionManager;
 import org.tikv.common.region.RegionStoreClient;
 import org.tikv.common.region.TiRegion;
 import org.tikv.kvproto.Kvrpcpb;
+import org.tikv.kvproto.Kvrpcpb.Op;
+import org.tikv.kvproto.Kvrpcpb.WriteOp;
 
 public class ClientUtils {
   /**
@@ -99,6 +101,42 @@ public class ClientUtils {
     }
   }
 
+  /**
+   * Append batch to list and split them according to batch limit
+   *
+   * @param backOffer backOffer
+   * @param batches a grouped batch
+   * @param region region
+   * @param writeOps writeOps write batch
+   * @param batchMaxSizeInBytes batch max limit
+   */
+  public static void appendWriteBatches(
+      BackOffer backOffer,
+      List<WriteBatch> batches,
+      TiRegion region,
+      List<WriteOp> writeOps,
+      int batchMaxSizeInBytes,
+      int batchLimit) {
+    if (writeOps == null) {
+      return;
+    }
+    int len = writeOps.size();
+    for (int start = 0, end; start < len; start = end) {
+      int size = 0;
+      for (end = start;
+          end < len && size < batchMaxSizeInBytes && end - start < batchLimit;
+          end++) {
+        WriteOp writeOp = writeOps.get(end);
+        size += writeOp.getKey().size();
+        if (writeOp.getOp() == Op.Put) {
+          size += writeOp.getValue().size();
+        }
+      }
+      WriteBatch batch = new WriteBatch(backOffer, region, writeOps.subList(start, end));
+      batches.add(batch);
+    }
+  }
+
   public static List<Batch> getBatches(
       BackOffer backOffer,
       List<ByteString> keys,
@@ -127,12 +165,35 @@ public class ClientUtils {
     return groupKeysByRegion(regionManager, keys, backoffer, false);
   }
 
+  public static Map<TiRegion, List<WriteOp>> groupWriteOpsByRegion(
+      RegionManager regionManager, List<WriteOp> batch, BackOffer backoffer) {
+    return groupWriteOpsByRegion(regionManager, batch, backoffer, false);
+  }
+
   /**
    * Group by list of keys according to its region
    *
-   * @param keys keys
+   * @param batch write batch
    * @return a mapping of keys and their region
    */
+  public static Map<TiRegion, List<WriteOp>> groupWriteOpsByRegion(
+      RegionManager regionManager, List<WriteOp> batch, BackOffer backoffer, boolean sorted) {
+    Map<TiRegion, List<WriteOp>> groups = new HashMap<>();
+    if (!sorted) {
+      batch.sort(
+          (k1, k2) ->
+              FastByteComparisons.compareTo(k1.getKey().toByteArray(), k2.getKey().toByteArray()));
+    }
+    TiRegion lastRegion = null;
+    for (WriteOp writeOp : batch) {
+      if (lastRegion == null || !lastRegion.contains(writeOp.getKey())) {
+        lastRegion = regionManager.getRegionByKey(writeOp.getKey(), backoffer);
+      }
+      groups.computeIfAbsent(lastRegion, k -> new ArrayList<>()).add(writeOp);
+    }
+    return groups;
+  }
+
   public static Map<TiRegion, List<ByteString>> groupKeysByRegion(
       RegionManager regionManager, List<ByteString> keys, BackOffer backoffer, boolean sorted) {
     Map<TiRegion, List<ByteString>> groups = new HashMap<>();

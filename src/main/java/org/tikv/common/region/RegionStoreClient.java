@@ -70,6 +70,7 @@ import org.tikv.common.util.ConcreteBackOffer;
 import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.RangeSplitter;
+import org.tikv.common.util.WriteBatch;
 import org.tikv.kvproto.Coprocessor;
 import org.tikv.kvproto.Errorpb;
 import org.tikv.kvproto.Kvrpcpb.BatchGetRequest;
@@ -89,6 +90,8 @@ import org.tikv.kvproto.Kvrpcpb.RawBatchGetRequest;
 import org.tikv.kvproto.Kvrpcpb.RawBatchGetResponse;
 import org.tikv.kvproto.Kvrpcpb.RawBatchPutRequest;
 import org.tikv.kvproto.Kvrpcpb.RawBatchPutResponse;
+import org.tikv.kvproto.Kvrpcpb.RawBatchWriteRequest;
+import org.tikv.kvproto.Kvrpcpb.RawBatchWriteResponse;
 import org.tikv.kvproto.Kvrpcpb.RawCASRequest;
 import org.tikv.kvproto.Kvrpcpb.RawCASResponse;
 import org.tikv.kvproto.Kvrpcpb.RawDeleteRangeRequest;
@@ -103,12 +106,15 @@ import org.tikv.kvproto.Kvrpcpb.RawPutRequest;
 import org.tikv.kvproto.Kvrpcpb.RawPutResponse;
 import org.tikv.kvproto.Kvrpcpb.RawScanRequest;
 import org.tikv.kvproto.Kvrpcpb.RawScanResponse;
+import org.tikv.kvproto.Kvrpcpb.RawSetKeyTTLRequest;
+import org.tikv.kvproto.Kvrpcpb.RawSetKeyTTLResponse;
 import org.tikv.kvproto.Kvrpcpb.ScanRequest;
 import org.tikv.kvproto.Kvrpcpb.ScanResponse;
 import org.tikv.kvproto.Kvrpcpb.SplitRegionRequest;
 import org.tikv.kvproto.Kvrpcpb.SplitRegionResponse;
 import org.tikv.kvproto.Kvrpcpb.TxnHeartBeatRequest;
 import org.tikv.kvproto.Kvrpcpb.TxnHeartBeatResponse;
+import org.tikv.kvproto.Kvrpcpb.WriteOp;
 import org.tikv.kvproto.Metapb;
 import org.tikv.kvproto.TikvGrpc;
 import org.tikv.kvproto.TikvGrpc.TikvBlockingStub;
@@ -954,6 +960,45 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
     return Optional.of(resp.getTtl());
   }
 
+  public void rawSetKeyTTL(ConcreteBackOffer backOffer, ByteString key, long ttl) {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY
+            .labels("client_grpc_raw_set_key_ttl", clusterId.toString())
+            .startTimer();
+    try {
+      Supplier<RawSetKeyTTLRequest> factory =
+          () ->
+              RawSetKeyTTLRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .setKey(codec.encodeKey(key))
+                  .setTtl(ttl)
+                  .build();
+      RegionErrorHandler<RawSetKeyTTLResponse> handler =
+          new RegionErrorHandler<>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      RawSetKeyTTLResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawSetKeyTTLMethod(), factory, handler);
+      rawSetKeyTTLHelper(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  private void rawSetKeyTTLHelper(RawSetKeyTTLResponse resp) {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawGetResponse failed without a cause");
+    }
+    String error = resp.getError();
+    if (!error.isEmpty()) {
+      throw new KeyException(resp.getError());
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+  }
+
   public void rawDelete(BackOffer backOffer, ByteString key, boolean atomicForCAS) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
@@ -1175,7 +1220,56 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
     rawBatchPut(backOffer, pairs, ttl, atomicForCAS);
   }
 
+  public void rawBatchWrite(
+      BackOffer backOffer, List<WriteOp> writeOps, long ttl, boolean atomicForCAS) {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY
+            .labels("client_grpc_raw_batch_write", clusterId.toString())
+            .startTimer();
+    try {
+      if (writeOps.isEmpty()) {
+        return;
+      }
+      Supplier<RawBatchWriteRequest> factory =
+          () ->
+              RawBatchWriteRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .addAllBatch(writeOps)
+                  .setTtl(ttl)
+                  .addTtls(ttl)
+                  .setForCas(atomicForCAS)
+                  .build();
+      RegionErrorHandler<RawBatchWriteResponse> handler =
+          new RegionErrorHandler<>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      RawBatchWriteResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawBatchWriteMethod(), factory, handler);
+      handleRawBatchWrite(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  public void rawBatchWrite(BackOffer backOffer, WriteBatch batch, long ttl, boolean atomicForCAS) {
+    rawBatchWrite(backOffer, batch.getWriteOps(), ttl, atomicForCAS);
+  }
+
   private void handleRawBatchPut(RawBatchPutResponse resp) {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawBatchPutResponse failed without a cause");
+    }
+    String error = resp.getError();
+    if (!error.isEmpty()) {
+      throw new KeyException(resp.getError());
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+  }
+
+  private void handleRawBatchWrite(RawBatchWriteResponse resp) {
     if (resp == null) {
       this.regionManager.onRequestFail(region);
       throw new TiClientInternalException("RawBatchPutResponse failed without a cause");
@@ -1254,33 +1348,34 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @param keyOnly true if value of KvPair is not needed
    * @return KvPair list
    */
-  public List<KvPair> rawScan(BackOffer backOffer, ByteString start, ByteString end, int limit, boolean keyOnly) {
+  public List<KvPair> rawScan(
+      BackOffer backOffer, ByteString start, ByteString end, int limit, boolean keyOnly) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
-            GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_scan", clusterId.toString()).startTimer();
+        GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_scan", clusterId.toString()).startTimer();
     try {
       Supplier<RawScanRequest> factory =
-              () -> {
-                ByteString rangeEnd = end;
-                if(end == null) {
-                  rangeEnd = ByteString.EMPTY;
-                }
+          () -> {
+            ByteString rangeEnd = end;
+            if (end == null) {
+              rangeEnd = ByteString.EMPTY;
+            }
 
-                Pair<ByteString, ByteString> range = codec.encodeRange(start, rangeEnd);
-                return RawScanRequest.newBuilder()
-                        .setContext(makeContext(storeType, backOffer.getSlowLog()))
-                        .setStartKey(range.first)
-                        .setEndKey(range.second)
-                        .setKeyOnly(keyOnly)
-                        .setLimit(limit)
-                        .build();
-              };
+            Pair<ByteString, ByteString> range = codec.encodeRange(start, rangeEnd);
+            return RawScanRequest.newBuilder()
+                .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                .setStartKey(range.first)
+                .setEndKey(range.second)
+                .setKeyOnly(keyOnly)
+                .setLimit(limit)
+                .build();
+          };
 
       RegionErrorHandler<RawScanResponse> handler =
-              new RegionErrorHandler<RawScanResponse>(
-                      regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+          new RegionErrorHandler<RawScanResponse>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
       RawScanResponse resp =
-              callWithRetry(backOffer, TikvGrpc.getRawScanMethod(), factory, handler);
+          callWithRetry(backOffer, TikvGrpc.getRawScanMethod(), factory, handler);
       // RegionErrorHandler may refresh region cache due to outdated region info,
       // This region need to get newest info from cache.
       region = regionManager.getRegionByKey(start, backOffer);

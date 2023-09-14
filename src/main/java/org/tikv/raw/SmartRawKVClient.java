@@ -31,6 +31,7 @@ import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
 import org.tikv.kvproto.Kvrpcpb;
+import org.tikv.kvproto.Kvrpcpb.WriteOp;
 import org.tikv.service.failsafe.CircuitBreaker;
 
 public class SmartRawKVClient implements RawKVClientBase {
@@ -114,6 +115,11 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void batchWrite(List<WriteOp> batch, long ttl) {
+    callWithCircuitBreaker("batchWrite", () -> client.batchWrite(batch, ttl));
+  }
+
+  @Override
   public Optional<ByteString> get(ByteString key) {
     return callWithCircuitBreaker("get", () -> client.get(key));
   }
@@ -131,6 +137,11 @@ public class SmartRawKVClient implements RawKVClientBase {
   @Override
   public Optional<Long> getKeyTTL(ByteString key) {
     return callWithCircuitBreaker("getKeyTTL", () -> client.getKeyTTL(key));
+  }
+
+  @Override
+  public void setKeyTTL(ByteString key, long ttl) {
+    callWithCircuitBreaker("setKeyTTL", () -> client.setKeyTTL(key, ttl));
   }
 
   @Override

@@ -124,6 +124,6 @@ public class ChannelFactoryTest {
     reactor.join();
 
     factory.close();
-    assertTrue(factory.connPool.isEmpty());
+    assertTrue(factory.getConnPool().isEmpty());
   }
 }
