@@ -22,6 +22,7 @@ import static org.tikv.common.util.ClientUtils.groupKeysByRegion;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.ByteString;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +54,7 @@ import org.tikv.common.util.BackOffer;
 import org.tikv.common.util.ChannelFactory;
 import org.tikv.common.util.ConcreteBackOffer;
 import org.tikv.common.util.Pair;
+import org.tikv.common.util.TiKVPDHttpClient;
 import org.tikv.kvproto.Errorpb;
 import org.tikv.kvproto.ImportSstpb;
 import org.tikv.kvproto.Metapb;
@@ -601,59 +603,92 @@ public class TiSession implements AutoCloseable {
    * @param scatterRegionBackoffMS
    * @param scatterWaitMS
    */
-  public void splitRegionAndScatter(
+  public synchronized void splitRegionAndScatter(
       List<byte[]> splitKeys,
       int splitRegionBackoffMS,
       int scatterRegionBackoffMS,
       int scatterWaitMS) {
     checkIsClosed();
 
+    if (splitKeys == null || splitKeys.size() == 0) {
+      logger.info("Split keys are empty, just return");
+      return;
+    }
     logger.info(String.format("split key's size is %d", splitKeys.size()));
-    long startMS = System.currentTimeMillis();
 
-    // split region
-    List<Metapb.Region> newRegions =
-        splitRegion(
-            splitKeys
-                .stream()
-                .map(k -> Key.toRawKey(k).toByteString())
-                .collect(Collectors.toList()),
-            ConcreteBackOffer.newCustomBackOff(splitRegionBackoffMS, getPDClient().getClusterId()));
-
-    // scatter region
-    for (Metapb.Region newRegion : newRegions) {
-      try {
-        getPDClient()
-            .scatterRegion(
-                newRegion,
-                ConcreteBackOffer.newCustomBackOff(
-                    scatterRegionBackoffMS, getPDClient().getClusterId()));
-      } catch (Exception e) {
-        logger.warn(String.format("failed to scatter region: %d", newRegion.getId()), e);
+    // Enable region split first
+    TiKVPDHttpClient pdHttpClient = new TiKVPDHttpClient(conf.getPdAddrs());
+    boolean oldRegionSplitEnable;
+    try {
+      // Check region split enable or not
+      oldRegionSplitEnable = pdHttpClient.isRegionSplitEnable();
+      if (!oldRegionSplitEnable) {
+        // Enable
+        pdHttpClient.regionSplitEnable(true);
       }
+    } catch (IOException e) {
+      logger.error("Get region split enable config from pd failed", e);
+      throw new TiKVException(e);
     }
 
-    // wait scatter region finish
-    if (scatterWaitMS > 0) {
-      logger.info("start to wait scatter region finish");
-      long scatterRegionStartMS = System.currentTimeMillis();
+    try {
+      long startMS = System.currentTimeMillis();
+
+      // split region
+      List<Metapb.Region> newRegions =
+          splitRegion(
+              splitKeys
+                  .stream()
+                  .map(k -> Key.toRawKey(k).toByteString())
+                  .collect(Collectors.toList()),
+              ConcreteBackOffer.newCustomBackOff(
+                  splitRegionBackoffMS, getPDClient().getClusterId()));
+
+      // scatter region
       for (Metapb.Region newRegion : newRegions) {
-        long remainMS = (scatterRegionStartMS + scatterWaitMS) - System.currentTimeMillis();
-        if (remainMS <= 0) {
-          logger.warn("wait scatter region timeout");
-          return;
+        try {
+          getPDClient()
+              .scatterRegion(
+                  newRegion,
+                  ConcreteBackOffer.newCustomBackOff(
+                      scatterRegionBackoffMS, getPDClient().getClusterId()));
+        } catch (Exception e) {
+          logger.warn(String.format("failed to scatter region: %d", newRegion.getId()), e);
         }
-        getPDClient()
-            .waitScatterRegionFinish(
-                newRegion,
-                ConcreteBackOffer.newCustomBackOff((int) remainMS, getPDClient().getClusterId()));
       }
-    } else {
-      logger.info("skip to wait scatter region finish");
-    }
 
-    long endMS = System.currentTimeMillis();
-    logger.info("splitRegionAndScatter cost {} seconds", (endMS - startMS) / 1000);
+      // wait scatter region finish
+      if (scatterWaitMS > 0) {
+        logger.info("start to wait scatter region finish");
+        long scatterRegionStartMS = System.currentTimeMillis();
+        for (Metapb.Region newRegion : newRegions) {
+          long remainMS = (scatterRegionStartMS + scatterWaitMS) - System.currentTimeMillis();
+          if (remainMS <= 0) {
+            logger.warn("wait scatter region timeout");
+            return;
+          }
+          getPDClient()
+              .waitScatterRegionFinish(
+                  newRegion,
+                  ConcreteBackOffer.newCustomBackOff((int) remainMS, getPDClient().getClusterId()));
+        }
+      } else {
+        logger.info("skip to wait scatter region finish");
+      }
+
+      long endMS = System.currentTimeMillis();
+      logger.info("splitRegionAndScatter cost {} seconds", (endMS - startMS) / 1000);
+    } finally {
+      if (!oldRegionSplitEnable) {
+        try {
+          pdHttpClient.regionSplitEnable(false);
+        } catch (IOException e) {
+          logger.error("Disable region split failed", e);
+          throw new TiKVException(e);
+        }
+      }
+      pdHttpClient.close();
+    }
   }
 
   /**
@@ -661,7 +696,7 @@ public class TiSession implements AutoCloseable {
    *
    * @param splitKeys
    */
-  public void splitRegionAndScatter(List<byte[]> splitKeys) {
+  public synchronized void splitRegionAndScatter(List<byte[]> splitKeys) {
     checkIsClosed();
 
     int splitRegionBackoffMS = BackOffer.SPLIT_REGION_BACKOFF;
@@ -713,7 +748,7 @@ public class TiSession implements AutoCloseable {
                 String.format(
                     "Skip split region because MAX_SPLIT_REGION_STACK_DEPTH(%d) reached!",
                     MAX_SPLIT_REGION_STACK_DEPTH));
-            newRegions = new ArrayList<>();
+            throw e;
           } else {
             newRegions = splitRegion(splits, backOffer, depth + 1);
           }
