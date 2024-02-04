@@ -32,6 +32,9 @@ public class ConfigUtils {
       "tikv.grpc.pd_first_get_member_timeout_in_ms";
   public static final String TIKV_GRPC_SCAN_TIMEOUT = "tikv.grpc.scan_timeout_in_ms";
   public static final String TIKV_GRPC_SCAN_BATCH_SIZE = "tikv.grpc.scan_batch_size";
+
+  public static final String TIKV_GRPC_SCAN_PREALLOCATE_ENABLE =
+      "tikv.grpc.scan_preallocate_enable";
   public static final String TIKV_GRPC_MAX_FRAME_SIZE = "tikv.grpc.max_frame_size";
   public static final String TIKV_GRPC_KEEPALIVE_TIME = "tikv.grpc.keepalive_time";
   public static final String TIKV_GRPC_KEEPALIVE_TIMEOUT = "tikv.grpc.keepalive_timeout";
@@ -134,6 +137,9 @@ public class ConfigUtils {
   public static final int DEF_CHECK_HEALTH_TIMEOUT = 100;
   public static final int DEF_HEALTH_CHECK_PERIOD_DURATION = 300;
   public static final int DEF_SCAN_BATCH_SIZE = 10240;
+
+  public static final boolean DEF_SCAN_PREALLOCATE_ENABLE = false;
+
   public static final int DEF_MAX_FRAME_SIZE = 268435456 * 2; // 256 * 2 MB
   public static final String DEF_TIKV_CONN_RECYCLE_TIME = "60s";
   public static final String DEF_TIKV_TLS_RELOAD_INTERVAL = "10s";

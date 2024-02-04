@@ -541,7 +541,14 @@ public class RawKVClient implements RawKVClientBase {
     try {
       Iterator<KvPair> iterator =
           rawScanIterator(conf, clientBuilder, startKey, endKey, limit, keyOnly, backOffer);
-      List<KvPair> result = new ArrayList<>();
+
+      List<KvPair> result;
+      if (conf.getScanPreallocateEnable() && limit > 0) {
+        result = new ArrayList<>(limit);
+      } else {
+        result = new ArrayList<>();
+      }
+
       iterator.forEachRemaining(result::add);
       RAW_REQUEST_SUCCESS.labels(labels).inc();
       return result;
@@ -948,7 +955,7 @@ public class RawKVClient implements RawKVClientBase {
         getBatches(backOffer, keys, RAW_BATCH_GET_SIZE, MAX_RAW_BATCH_LIMIT, this.clientBuilder);
 
     Queue<List<Batch>> taskQueue = new LinkedList<>();
-    List<KvPair> result = new ArrayList<>();
+    List<KvPair> result = new ArrayList<>(keys.size());
     taskQueue.offer(batches);
 
     while (!taskQueue.isEmpty()) {

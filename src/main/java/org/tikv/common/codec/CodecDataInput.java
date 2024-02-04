@@ -19,29 +19,34 @@ package org.tikv.common.codec;
 
 import com.google.protobuf.ByteString;
 import java.io.*;
+import java.nio.BufferUnderflowException;
+import java.nio.ByteBuffer;
 import javax.annotation.Nonnull;
 
 public class CodecDataInput implements DataInput {
   protected final DataInputStream inputStream;
-  protected final UnSyncByteArrayInputStream backingStream;
+  protected final InputStream backingStream;
   protected final byte[] backingBuffer;
+  protected final ByteBuffer buffer;
 
   public CodecDataInput(ByteString data) {
     this(data.toByteArray());
   }
 
+  public CodecDataInput(ByteBuffer buf) {
+    backingBuffer = null;
+    buffer = buf;
+    backingStream = new ByteBufferInputStream(buf);
+    inputStream = new DataInputStream(backingStream);
+  }
+
   public CodecDataInput(byte[] buf) {
     backingBuffer = buf;
+    buffer = null;
     // MyDecimal usually will consume more bytes. If this happened,
     // we need have a mechanism to reset backingStream.
     // User mark first and then reset it later can do the trick.
-    backingStream =
-        new UnSyncByteArrayInputStream(buf) {
-          @Override
-          public void mark(int givenPos) {
-            mark = givenPos;
-          }
-        };
+    backingStream = new UnSyncByteArrayInputStream(buf);
     inputStream = new DataInputStream(backingStream);
   }
 
@@ -207,11 +212,19 @@ public class CodecDataInput implements DataInput {
   }
 
   public void reset() {
-    this.backingStream.reset();
+    try {
+      this.backingStream.reset();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   public boolean eof() {
-    return backingStream.available() == 0;
+    try {
+      return backingStream.available() == 0;
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   public int size() {
@@ -219,11 +232,24 @@ public class CodecDataInput implements DataInput {
   }
 
   public int available() {
-    return backingStream.available();
+    try {
+      return backingStream.available();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   public byte[] toByteArray() {
-    return backingBuffer;
+    if (backingBuffer != null) {
+      return backingBuffer;
+    } else {
+      byte[] data = new byte[buffer.limit()];
+      int positionOld = buffer.position();
+      buffer.position(0);
+      buffer.get(data, 0, data.length);
+      buffer.position(positionOld);
+      return data;
+    }
   }
 
   /**
@@ -294,13 +320,97 @@ public class CodecDataInput implements DataInput {
     }
 
     @Override
-    public void mark(int readAheadLimit) {
-      mark = pos;
+    public void mark(int givenPos) {
+      mark = givenPos;
     }
 
     @Override
     public void reset() {
       pos = mark;
+    }
+
+    @Override
+    public void close() throws IOException {}
+  }
+
+  /**
+   * An copy of ByteArrayInputStream without synchronization for faster decode.
+   *
+   * @see ByteArrayInputStream
+   */
+  private static class ByteBufferInputStream extends InputStream {
+    protected final ByteBuffer buf;
+    protected int mark = 0;
+    protected int count;
+
+    ByteBufferInputStream(ByteBuffer buf) {
+      this.buf = buf;
+      this.count = buf.limit();
+    }
+
+    @Override
+    public int read() {
+      try {
+        byte b = buf.get();
+        return b & 0xff;
+      } catch (BufferUnderflowException e) {
+        return -1;
+      }
+    }
+
+    @Override
+    public int read(byte[] b, int off, int len) {
+      if (b == null) {
+        throw new NullPointerException();
+      } else if (off < 0 || len < 0 || len > b.length - off) {
+        throw new IndexOutOfBoundsException();
+      }
+
+      if (buf.position() >= count) {
+        return -1;
+      }
+
+      int avail = count - buf.position();
+      if (len > avail) {
+        len = avail;
+      }
+      if (len <= 0) {
+        return 0;
+      }
+
+      buf.get(b, off, len);
+      return len;
+    }
+
+    @Override
+    public long skip(long n) {
+      long k = count - buf.position();
+      if (n < k) {
+        k = n < 0 ? 0 : n;
+      }
+
+      buf.position((int) (buf.position() + k));
+      return k;
+    }
+
+    @Override
+    public int available() {
+      return count - buf.position();
+    }
+
+    @Override
+    public boolean markSupported() {
+      return true;
+    }
+
+    @Override
+    public void mark(int givenPos) {
+      mark = givenPos;
+    }
+
+    @Override
+    public void reset() {
+      buf.position(mark);
     }
 
     @Override
