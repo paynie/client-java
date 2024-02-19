@@ -60,6 +60,18 @@ public abstract class ScanIterator implements Iterator<Kvrpcpb.KvPair> {
     this.builder = builder;
   }
 
+  public int getCurrentBatchSize() {
+    if (currentCache != null) {
+      return currentCache.size();
+    } else {
+      return 0;
+    }
+  }
+
+  public List<Kvrpcpb.KvPair> getCurrentCache() {
+    return currentCache;
+  }
+
   /**
    * Load current region to cache, returns the region if loaded.
    *

@@ -61,6 +61,7 @@ import org.tikv.common.log.SlowLogEmptyImpl;
 import org.tikv.common.log.SlowLogImpl;
 import org.tikv.common.log.SlowLogSpan;
 import org.tikv.common.operation.iterator.RawScanIterator;
+import org.tikv.common.operation.iterator.ScanIterator;
 import org.tikv.common.region.RegionStoreClient;
 import org.tikv.common.region.RegionStoreClient.RegionStoreClientBuilder;
 import org.tikv.common.region.TiRegion;
@@ -539,15 +540,35 @@ public class RawKVClient implements RawKVClientBase {
     ConcreteBackOffer backOffer =
         ConcreteBackOffer.newDeadlineBackOff(conf.getRawKVScanTimeoutInMS(), slowLog, clusterId);
     try {
-      Iterator<KvPair> iterator =
-          rawScanIterator(conf, clientBuilder, startKey, endKey, limit, keyOnly, backOffer);
-
       List<KvPair> result;
+
+      // Check if start key and end key are in the same region
+      if (limit > 0
+          && startKey != null
+          && !startKey.isEmpty()
+          && endKey != null
+          && !endKey.isEmpty()) {
+        TiRegion startRegion = clientBuilder.getRegionByKey(startKey);
+        TiRegion endRegion = clientBuilder.getRegionByKey(endKey);
+        if (startRegion != null && endRegion != null && startRegion.getId() == endRegion.getId()) {
+          try (RegionStoreClient client = clientBuilder.build(startKey, backOffer)) {
+            client.setTimeout(conf.getRawKVScanTimeoutInMS());
+            result = client.rawScan(backOffer, startKey, endKey, limit, keyOnly);
+          }
+
+          RAW_REQUEST_SUCCESS.labels(labels).inc();
+          return result;
+        }
+      }
+
       if (conf.getScanPreallocateEnable() && limit > 0) {
         result = new ArrayList<>(limit);
       } else {
         result = new ArrayList<>();
       }
+
+      ScanIterator iterator =
+          rawScanIterator(conf, clientBuilder, startKey, endKey, limit, keyOnly, backOffer);
 
       iterator.forEachRemaining(result::add);
       RAW_REQUEST_SUCCESS.labels(labels).inc();
@@ -1147,7 +1168,7 @@ public class RawKVClient implements RawKVClientBase {
     return regions;
   }
 
-  private Iterator<KvPair> rawScanIterator(
+  private ScanIterator rawScanIterator(
       TiConfiguration conf,
       RegionStoreClientBuilder builder,
       ByteString startKey,

@@ -1553,6 +1553,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
       return build(pair.first, pair.second, storeType);
     }
 
+    public TiRegion getRegionByKey(ByteString key) {
+      return regionManager.getRegionByKey(key);
+    }
+
     public RegionStoreClient build(TiRegion region) throws GrpcException {
       return build(region, defaultBackOff());
     }
