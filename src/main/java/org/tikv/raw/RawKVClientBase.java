@@ -54,6 +54,25 @@ public interface RawKVClientBase extends AutoCloseable {
   void put(ByteString key, ByteString value, long ttl);
 
   /**
+   * Put a raw key-value pair to TiKV
+   *
+   * @param key raw key
+   * @param value raw value
+   * @param cf column family name
+   */
+  void put(ByteString key, ByteString value, String cf);
+
+  /**
+   * Put a raw key-value pair to TiKV
+   *
+   * @param key raw key
+   * @param value raw value
+   * @param ttl the ttl of the key (in seconds), 0 means the key will never be outdated
+   * @param cf column family name
+   */
+  void put(ByteString key, ByteString value, long ttl, String cf);
+
+  /**
    * Put a key-value pair if it does not exist. This API is atomic.
    *
    * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
@@ -79,6 +98,33 @@ public interface RawKVClientBase extends AutoCloseable {
   Optional<ByteString> putIfAbsent(ByteString key, ByteString value, long ttl);
 
   /**
+   * Put a key-value pair if it does not exist. This API is atomic.
+   *
+   * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
+   *
+   * @param key key
+   * @param value value
+   * @param cf column family
+   * @return a ByteString. returns Optional.EMPTY if the value is written successfully. returns the
+   *     previous key if the value already exists, and does not write to TiKV.
+   */
+  Optional<ByteString> putIfAbsent(ByteString key, ByteString value, String cf);
+
+  /**
+   * Put a key-value pair with TTL if it does not exist. This API is atomic.
+   *
+   * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
+   *
+   * @param key key
+   * @param value value
+   * @param ttl TTL of key (in seconds), 0 means the key will never be outdated.
+   * @param cf column family
+   * @return a ByteString. returns Optional.EMPTY if the value is written successfully. returns the
+   *     previous key if the value already exists, and does not write to TiKV.
+   */
+  Optional<ByteString> putIfAbsent(ByteString key, ByteString value, long ttl, String cf);
+
+  /**
    * Put a key-value pair if the prevValue matched the value in TiKV. This API is atomic.
    *
    * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
@@ -100,6 +146,30 @@ public interface RawKVClientBase extends AutoCloseable {
   void compareAndSet(ByteString key, Optional<ByteString> prevValue, ByteString value, long ttl);
 
   /**
+   * Put a key-value pair if the prevValue matched the value in TiKV. This API is atomic.
+   *
+   * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
+   *
+   * @param key key
+   * @param value value
+   * @param cf column family
+   */
+  void compareAndSet(ByteString key, Optional<ByteString> prevValue, ByteString value, String cf);
+
+  /**
+   * pair if the prevValue matched the value in TiKV. This API is atomic.
+   *
+   * <p>To use this API, please enable `tikv.enable_atomic_for_cas`.
+   *
+   * @param key key
+   * @param value value
+   * @param ttl TTL of key (in seconds), 0 means the key will never be outdated.
+   * @param cf column family
+   */
+  void compareAndSet(
+      ByteString key, Optional<ByteString> prevValue, ByteString value, long ttl, String cf);
+
+  /**
    * Put a set of raw key-value pair to TiKV.
    *
    * @param kvPairs kvPairs
@@ -117,10 +187,36 @@ public interface RawKVClientBase extends AutoCloseable {
   /**
    * Put a set of raw key-value pair to TiKV.
    *
+   * @param kvPairs kvPairs
+   * @param cf column family name
+   */
+  void batchPut(Map<ByteString, ByteString> kvPairs, String cf);
+
+  /**
+   * Put a set of raw key-value pair to TiKV.
+   *
+   * @param kvPairs kvPairs
+   * @param ttl the TTL of keys to be put (in seconds), 0 means the keys will never be outdated
+   * @param cf column family name
+   */
+  void batchPut(Map<ByteString, ByteString> kvPairs, long ttl, String cf);
+
+  /**
+   * Put a set of raw key-value pair to TiKV.
+   *
    * @param batch batch
    * @param ttl the TTL of keys to be put (in seconds), 0 means the keys will never be outdated
    */
   void batchWrite(List<WriteOp> batch, long ttl);
+
+  /**
+   * Put a set of raw key-value pair to TiKV.
+   *
+   * @param batch batch
+   * @param ttl the TTL of keys to be put (in seconds), 0 means the keys will never be outdated
+   * @param cf column family
+   */
+  void batchWrite(List<WriteOp> batch, long ttl, String cf);
 
   /**
    * Get a raw key-value pair from TiKV if key exists
@@ -129,6 +225,24 @@ public interface RawKVClientBase extends AutoCloseable {
    * @return a ByteString value if key exists, ByteString.EMPTY if key does not exist
    */
   Optional<ByteString> get(ByteString key);
+
+  /**
+   * Get a list of raw key-value pair from TiKV if key exists
+   *
+   * @param keys list of raw key
+   * @param cf column family
+   * @return a ByteString value if key exists, ByteString.EMPTY if key does not exist
+   */
+  List<Kvrpcpb.KvPair> batchGet(List<ByteString> keys, String cf);
+
+  /**
+   * Get a raw key-value pair from TiKV if key exists
+   *
+   * @param key raw key
+   * @param cf column family
+   * @return a ByteString value if key exists, ByteString.EMPTY if key does not exist
+   */
+  Optional<ByteString> get(ByteString key, String cf);
 
   /**
    * Get a list of raw key-value pair from TiKV if key exists
@@ -146,6 +260,14 @@ public interface RawKVClientBase extends AutoCloseable {
   void batchDelete(List<ByteString> keys);
 
   /**
+   * Delete a list of raw key-value pair from TiKV if key exists
+   *
+   * @param keys list of raw key
+   * @param cf column family
+   */
+  void batchDelete(List<ByteString> keys, String cf);
+
+  /**
    * Get the TTL of a raw key from TiKV if key exists
    *
    * @param key raw key
@@ -155,12 +277,31 @@ public interface RawKVClientBase extends AutoCloseable {
   Optional<Long> getKeyTTL(ByteString key);
 
   /**
+   * Get the TTL of a raw key from TiKV if key exists
+   *
+   * @param key raw key
+   * @param cf column family
+   * @return a Long indicating the TTL of key ttl is a non-null long value indicating TTL if key
+   *     exists. - ttl=0 if the key will never be outdated. - ttl=null if the key does not exist
+   */
+  Optional<Long> getKeyTTL(ByteString key, String cf);
+
+  /**
    * Set key TTL
    *
    * @param key raw key
    * @param ttl time to live
    */
   void setKeyTTL(ByteString key, long ttl);
+
+  /**
+   * Set key TTL
+   *
+   * @param key raw key
+   * @param ttl time to live
+   * @param cf column family
+   */
+  void setKeyTTL(ByteString key, long ttl, String cf);
 
   /**
    * Create a new `batch scan` request with `keyOnly` option Once resolved this request will result
@@ -172,9 +313,27 @@ public interface RawKVClientBase extends AutoCloseable {
    * pairs for each range. But you should not miss any entries.
    *
    * @param ranges a list of ranges
+   * @param eachLimit result limit for each range
    * @return a set of scanners for keys over the given keys.
    */
   List<List<ByteString>> batchScanKeys(List<Pair<ByteString, ByteString>> ranges, int eachLimit);
+
+  /**
+   * Create a new `batch scan` request with `keyOnly` option Once resolved this request will result
+   * in a set of scanners over the given keys.
+   *
+   * <p>WARNING: This method is experimental. The `each_limit` parameter does not work as expected.
+   * It does not limit the number of results returned of each range, instead it limits the number of
+   * results in each region of each range. As a result, you may get more than each_limit key-value
+   * pairs for each range. But you should not miss any entries.
+   *
+   * @param ranges a list of ranges
+   * @param eachLimit result limit for each range
+   * @param cf column family
+   * @return a set of scanners for keys over the given keys.
+   */
+  List<List<ByteString>> batchScanKeys(
+      List<Pair<ByteString, ByteString>> ranges, int eachLimit, String cf);
 
   /**
    * Create a new `batch scan` request. Once resolved this request will result in a set of scanners
@@ -189,6 +348,21 @@ public interface RawKVClientBase extends AutoCloseable {
    * @return a set of scanners over the given keys.
    */
   List<List<Kvrpcpb.KvPair>> batchScan(List<ScanOption> ranges);
+
+  /**
+   * Create a new `batch scan` request. Once resolved this request will result in a set of scanners
+   * over the given keys.
+   *
+   * <p>WARNING: This method is experimental. The `each_limit` parameter does not work as expected.
+   * It does not limit the number of results returned of each range, instead it limits the number of
+   * results in each region of each range. As a result, you may get more than each_limit key-value
+   * pairs for each range. But you should not miss any entries.
+   *
+   * @param ranges a list of `ScanOption` for each range
+   * @param cf column family
+   * @return a set of scanners over the given keys.
+   */
+  List<List<Kvrpcpb.KvPair>> batchScan(List<ScanOption> ranges, String cf);
 
   /**
    * Scan raw key-value pairs from TiKV in range [startKey, endKey)
@@ -206,10 +380,34 @@ public interface RawKVClientBase extends AutoCloseable {
    * @param startKey raw start key, inclusive
    * @param endKey raw end key, exclusive
    * @param limit limit of key-value pairs scanned, should be less than {@link #MAX_RAW_SCAN_LIMIT}
+   * @param cf column family
+   * @return list of key-value pairs in range
+   */
+  List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, int limit, String cf);
+
+  /**
+   * Scan raw key-value pairs from TiKV in range [startKey, endKey)
+   *
+   * @param startKey raw start key, inclusive
+   * @param endKey raw end key, exclusive
+   * @param limit limit of key-value pairs scanned, should be less than {@link #MAX_RAW_SCAN_LIMIT}
    * @param keyOnly whether to scan in key-only mode
    * @return list of key-value pairs in range
    */
   List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, int limit, boolean keyOnly);
+
+  /**
+   * Scan raw key-value pairs from TiKV in range [startKey, endKey)
+   *
+   * @param startKey raw start key, inclusive
+   * @param endKey raw end key, exclusive
+   * @param limit limit of key-value pairs scanned, should be less than {@link #MAX_RAW_SCAN_LIMIT}
+   * @param keyOnly whether to scan in key-only mode
+   * @param cf column family
+   * @return list of key-value pairs in range
+   */
+  List<Kvrpcpb.KvPair> scan(
+      ByteString startKey, ByteString endKey, int limit, boolean keyOnly, String cf);
 
   /**
    * Scan raw key-value pairs from TiKV in range [startKey, ♾)
@@ -225,10 +423,31 @@ public interface RawKVClientBase extends AutoCloseable {
    *
    * @param startKey raw start key, inclusive
    * @param limit limit of key-value pairs scanned, should be less than {@link #MAX_RAW_SCAN_LIMIT}
+   * @param cf column family
+   * @return list of key-value pairs in range
+   */
+  List<Kvrpcpb.KvPair> scan(ByteString startKey, int limit, String cf);
+
+  /**
+   * Scan raw key-value pairs from TiKV in range [startKey, ♾)
+   *
+   * @param startKey raw start key, inclusive
+   * @param limit limit of key-value pairs scanned, should be less than {@link #MAX_RAW_SCAN_LIMIT}
    * @param keyOnly whether to scan in key-only mode
    * @return list of key-value pairs in range
    */
   List<Kvrpcpb.KvPair> scan(ByteString startKey, int limit, boolean keyOnly);
+
+  /**
+   * Scan raw key-value pairs from TiKV in range [startKey, ♾)
+   *
+   * @param startKey raw start key, inclusive
+   * @param limit limit of key-value pairs scanned, should be less than {@link #MAX_RAW_SCAN_LIMIT}
+   * @param keyOnly whether to scan in key-only mode
+   * @param cf column family
+   * @return list of key-value pairs in range
+   */
+  List<Kvrpcpb.KvPair> scan(ByteString startKey, int limit, boolean keyOnly, String cf);
 
   /**
    * Scan all raw key-value pairs from TiKV in range [startKey, endKey)
@@ -244,10 +463,31 @@ public interface RawKVClientBase extends AutoCloseable {
    *
    * @param startKey raw start key, inclusive
    * @param endKey raw end key, exclusive
+   * @param cf column family
+   * @return list of key-value pairs in range
+   */
+  List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, String cf);
+
+  /**
+   * Scan all raw key-value pairs from TiKV in range [startKey, endKey)
+   *
+   * @param startKey raw start key, inclusive
+   * @param endKey raw end key, exclusive
    * @param keyOnly whether to scan in key-only mode
    * @return list of key-value pairs in range
    */
   List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, boolean keyOnly);
+
+  /**
+   * Scan all raw key-value pairs from TiKV in range [startKey, endKey)
+   *
+   * @param startKey raw start key, inclusive
+   * @param endKey raw end key, exclusive
+   * @param keyOnly whether to scan in key-only mode
+   * @return list of key-value pairs in range
+   * @param cf column family
+   */
+  List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, boolean keyOnly, String cf);
 
   /**
    * Scan keys with prefix
@@ -259,9 +499,52 @@ public interface RawKVClientBase extends AutoCloseable {
    */
   List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey, int limit, boolean keyOnly);
 
+  /**
+   * Scan keys with prefix
+   *
+   * @param prefixKey prefix key
+   * @return kvPairs with the specified prefix
+   */
   List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey);
 
+  /**
+   * Scan keys with prefix
+   *
+   * @param prefixKey prefix key
+   * @param keyOnly whether to scan in keyOnly mode
+   * @return kvPairs with the specified prefix
+   */
   List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey, boolean keyOnly);
+
+  /**
+   * Scan keys with prefix
+   *
+   * @param prefixKey prefix key
+   * @param limit limit of keys retrieved
+   * @param keyOnly whether to scan in keyOnly mode
+   * @param cf column family
+   * @return kvPairs with the specified prefix
+   */
+  List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey, int limit, boolean keyOnly, String cf);
+
+  /**
+   * Scan keys with prefix
+   *
+   * @param prefixKey prefix key
+   * @param cf column family
+   * @return kvPairs with the specified prefix
+   */
+  List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey, String cf);
+
+  /**
+   * Scan keys with prefix
+   *
+   * @param prefixKey prefix key
+   * @param keyOnly whether to scan in keyOnly mode
+   * @param cf column family
+   * @return kvPairs with the specified prefix
+   */
+  List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey, boolean keyOnly, String cf);
 
   /**
    * Delete a raw key-value pair from TiKV if key exists
@@ -269,6 +552,14 @@ public interface RawKVClientBase extends AutoCloseable {
    * @param key raw key to be deleted
    */
   void delete(ByteString key);
+
+  /**
+   * Delete a raw key-value pair from TiKV if key exists
+   *
+   * @param key raw key to be deleted
+   * @param cf column family
+   */
+  void delete(ByteString key, String cf);
 
   /**
    * Delete all raw key-value pairs in range [startKey, endKey) from TiKV
@@ -282,6 +573,18 @@ public interface RawKVClientBase extends AutoCloseable {
   void deleteRange(ByteString startKey, ByteString endKey);
 
   /**
+   * Delete all raw key-value pairs in range [startKey, endKey) from TiKV
+   *
+   * <p>Cautious, this API cannot be used concurrently, if multiple clients write keys into this
+   * range along with deleteRange API, the result will be undefined.
+   *
+   * @param startKey raw start key to be deleted
+   * @param endKey raw start key to be deleted
+   * @param cf column family
+   */
+  void deleteRange(ByteString startKey, ByteString endKey, String cf);
+
+  /**
    * Delete all raw key-value pairs with the prefix `key` from TiKV
    *
    * <p>Cautious, this API cannot be used concurrently, if multiple clients write keys into this
@@ -290,6 +593,17 @@ public interface RawKVClientBase extends AutoCloseable {
    * @param key prefix of keys to be deleted
    */
   void deletePrefix(ByteString key);
+
+  /**
+   * Delete all raw key-value pairs with the prefix `key` from TiKV
+   *
+   * <p>Cautious, this API cannot be used concurrently, if multiple clients write keys into this
+   * range along with deleteRange API, the result will be undefined.
+   *
+   * @param key prefix of keys to be deleted
+   * @param cf column family
+   */
+  void deletePrefix(ByteString key, String cf);
 
   /** Get the session of the current client */
   TiSession getSession();

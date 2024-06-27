@@ -31,6 +31,7 @@ import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
 import org.tikv.kvproto.Kvrpcpb;
+import org.tikv.kvproto.Kvrpcpb.KvPair;
 import org.tikv.kvproto.Kvrpcpb.WriteOp;
 import org.tikv.service.failsafe.CircuitBreaker;
 
@@ -84,6 +85,12 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void put(ByteString key, ByteString value, String cf) {}
+
+  @Override
+  public void put(ByteString key, ByteString value, long ttl, String cf) {}
+
+  @Override
   public Optional<ByteString> putIfAbsent(ByteString key, ByteString value) {
     return callWithCircuitBreaker("putIfAbsent", () -> client.putIfAbsent(key, value));
   }
@@ -91,6 +98,16 @@ public class SmartRawKVClient implements RawKVClientBase {
   @Override
   public Optional<ByteString> putIfAbsent(ByteString key, ByteString value, long ttl) {
     return callWithCircuitBreaker("putIfAbsent", () -> client.putIfAbsent(key, value, ttl));
+  }
+
+  @Override
+  public Optional<ByteString> putIfAbsent(ByteString key, ByteString value, String cf) {
+    return Optional.empty();
+  }
+
+  @Override
+  public Optional<ByteString> putIfAbsent(ByteString key, ByteString value, long ttl, String cf) {
+    return Optional.empty();
   }
 
   @Override
@@ -105,6 +122,14 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void compareAndSet(
+      ByteString key, Optional<ByteString> prevValue, ByteString value, String cf) {}
+
+  @Override
+  public void compareAndSet(
+      ByteString key, Optional<ByteString> prevValue, ByteString value, long ttl, String cf) {}
+
+  @Override
   public void batchPut(Map<ByteString, ByteString> kvPairs) {
     callWithCircuitBreaker("batchPut", () -> client.batchPut(kvPairs));
   }
@@ -115,13 +140,32 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void batchPut(Map<ByteString, ByteString> kvPairs, String cf) {}
+
+  @Override
+  public void batchPut(Map<ByteString, ByteString> kvPairs, long ttl, String cf) {}
+
+  @Override
   public void batchWrite(List<WriteOp> batch, long ttl) {
     callWithCircuitBreaker("batchWrite", () -> client.batchWrite(batch, ttl));
   }
 
   @Override
+  public void batchWrite(List<WriteOp> batch, long ttl, String cf) {}
+
+  @Override
   public Optional<ByteString> get(ByteString key) {
     return callWithCircuitBreaker("get", () -> client.get(key));
+  }
+
+  @Override
+  public List<KvPair> batchGet(List<ByteString> keys, String cf) {
+    return null;
+  }
+
+  @Override
+  public Optional<ByteString> get(ByteString key, String cf) {
+    return Optional.empty();
   }
 
   @Override
@@ -135,8 +179,16 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void batchDelete(List<ByteString> keys, String cf) {}
+
+  @Override
   public Optional<Long> getKeyTTL(ByteString key) {
     return callWithCircuitBreaker("getKeyTTL", () -> client.getKeyTTL(key));
+  }
+
+  @Override
+  public Optional<Long> getKeyTTL(ByteString key, String cf) {
+    return Optional.empty();
   }
 
   @Override
@@ -145,9 +197,18 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void setKeyTTL(ByteString key, long ttl, String cf) {}
+
+  @Override
   public List<List<ByteString>> batchScanKeys(
       List<Pair<ByteString, ByteString>> ranges, int eachLimit) {
     return callWithCircuitBreaker("batchScanKeys", () -> client.batchScanKeys(ranges, eachLimit));
+  }
+
+  @Override
+  public List<List<ByteString>> batchScanKeys(
+      List<Pair<ByteString, ByteString>> ranges, int eachLimit, String cf) {
+    return null;
   }
 
   @Override
@@ -156,8 +217,18 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public List<List<KvPair>> batchScan(List<ScanOption> ranges, String cf) {
+    return null;
+  }
+
+  @Override
   public List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, int limit) {
     return callWithCircuitBreaker("scan", () -> client.scan(startKey, endKey, limit));
+  }
+
+  @Override
+  public List<KvPair> scan(ByteString startKey, ByteString endKey, int limit, String cf) {
+    return null;
   }
 
   @Override
@@ -167,8 +238,19 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public List<KvPair> scan(
+      ByteString startKey, ByteString endKey, int limit, boolean keyOnly, String cf) {
+    return null;
+  }
+
+  @Override
   public List<Kvrpcpb.KvPair> scan(ByteString startKey, int limit) {
     return callWithCircuitBreaker("scan", () -> client.scan(startKey, limit));
+  }
+
+  @Override
+  public List<KvPair> scan(ByteString startKey, int limit, String cf) {
+    return null;
   }
 
   @Override
@@ -177,13 +259,28 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public List<KvPair> scan(ByteString startKey, int limit, boolean keyOnly, String cf) {
+    return null;
+  }
+
+  @Override
   public List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey) {
     return callWithCircuitBreaker("scan", () -> client.scan(startKey, endKey));
   }
 
   @Override
+  public List<KvPair> scan(ByteString startKey, ByteString endKey, String cf) {
+    return null;
+  }
+
+  @Override
   public List<Kvrpcpb.KvPair> scan(ByteString startKey, ByteString endKey, boolean keyOnly) {
     return callWithCircuitBreaker("scan", () -> client.scan(startKey, endKey, keyOnly));
+  }
+
+  @Override
+  public List<KvPair> scan(ByteString startKey, ByteString endKey, boolean keyOnly, String cf) {
+    return null;
   }
 
   @Override
@@ -202,9 +299,27 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public List<KvPair> scanPrefix(ByteString prefixKey, int limit, boolean keyOnly, String cf) {
+    return null;
+  }
+
+  @Override
+  public List<KvPair> scanPrefix(ByteString prefixKey, String cf) {
+    return null;
+  }
+
+  @Override
+  public List<KvPair> scanPrefix(ByteString prefixKey, boolean keyOnly, String cf) {
+    return null;
+  }
+
+  @Override
   public void delete(ByteString key) {
     callWithCircuitBreaker("delete", () -> client.delete(key));
   }
+
+  @Override
+  public void delete(ByteString key, String cf) {}
 
   @Override
   public void deleteRange(ByteString startKey, ByteString endKey) {
@@ -212,9 +327,15 @@ public class SmartRawKVClient implements RawKVClientBase {
   }
 
   @Override
+  public void deleteRange(ByteString startKey, ByteString endKey, String cf) {}
+
+  @Override
   public void deletePrefix(ByteString key) {
     callWithCircuitBreaker("deletePrefix", () -> client.deletePrefix(key));
   }
+
+  @Override
+  public void deletePrefix(ByteString key, String cf) {}
 
   @Override
   public TiSession getSession() {

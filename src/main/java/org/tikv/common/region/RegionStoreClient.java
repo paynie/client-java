@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.tikv.common.ConfigUtils;
 import org.tikv.common.PDClient;
 import org.tikv.common.StoreVersion;
 import org.tikv.common.TiConfiguration;
@@ -879,6 +880,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   // APIs for Raw Scan/Put/Get/Delete
 
   public Optional<ByteString> rawGet(BackOffer backOffer, ByteString key) {
+    return rawGet(backOffer, key, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public Optional<ByteString> rawGet(BackOffer backOffer, ByteString key, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_get", clusterId.toString()).startTimer();
@@ -888,6 +893,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
               RawGetRequest.newBuilder()
                   .setContext(makeContext(storeType, backOffer.getSlowLog()))
                   .setKey(codec.encodeKey(key))
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawGetResponse> handler =
           new RegionErrorHandler<RawGetResponse>(
@@ -919,6 +925,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   }
 
   public Optional<Long> rawGetKeyTTL(BackOffer backOffer, ByteString key) {
+    return rawGetKeyTTL(backOffer, key, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public Optional<Long> rawGetKeyTTL(BackOffer backOffer, ByteString key, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -930,6 +940,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
               RawGetKeyTTLRequest.newBuilder()
                   .setContext(makeContext(storeType, backOffer.getSlowLog()))
                   .setKey(codec.encodeKey(key))
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawGetKeyTTLResponse> handler =
           new RegionErrorHandler<RawGetKeyTTLResponse>(
@@ -961,6 +972,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   }
 
   public void rawSetKeyTTL(ConcreteBackOffer backOffer, ByteString key, long ttl) {
+    rawSetKeyTTL(backOffer, key, ttl, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public void rawSetKeyTTL(ConcreteBackOffer backOffer, ByteString key, long ttl, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -973,6 +988,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setContext(makeContext(storeType, backOffer.getSlowLog()))
                   .setKey(codec.encodeKey(key))
                   .setTtl(ttl)
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawSetKeyTTLResponse> handler =
           new RegionErrorHandler<>(
@@ -1041,6 +1057,16 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
 
   public void rawPut(
       BackOffer backOffer, ByteString key, ByteString value, long ttl, boolean atomicForCAS) {
+    rawPut(backOffer, key, value, ttl, atomicForCAS, "default");
+  }
+
+  public void rawPut(
+      BackOffer backOffer,
+      ByteString key,
+      ByteString value,
+      long ttl,
+      boolean atomicForCAS,
+      String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_put", clusterId.toString()).startTimer();
@@ -1053,6 +1079,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setValue(value)
                   .setTtl(ttl)
                   .setForCas(atomicForCAS)
+                  .setCf(cf)
                   .build();
 
       RegionErrorHandler<RawPutResponse> handler =
@@ -1086,6 +1113,17 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
       ByteString value,
       long ttl)
       throws RawCASConflictException {
+    rawCompareAndSet(backOffer, key, prevValue, value, ttl, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public void rawCompareAndSet(
+      BackOffer backOffer,
+      ByteString key,
+      Optional<ByteString> prevValue,
+      ByteString value,
+      long ttl,
+      String cf)
+      throws RawCASConflictException {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1101,6 +1139,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setPreviousValue(prevValue.orElse(ByteString.EMPTY))
                   .setPreviousNotExist(!prevValue.isPresent())
                   .setTtl(ttl)
+                  .setCf(cf)
                   .build();
 
       RegionErrorHandler<RawCASResponse> handler =
@@ -1139,6 +1178,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   }
 
   public List<KvPair> rawBatchGet(BackOffer backoffer, List<ByteString> keys) {
+    return rawBatchGet(backoffer, keys, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public List<KvPair> rawBatchGet(BackOffer backoffer, List<ByteString> keys, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1153,6 +1196,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
               RawBatchGetRequest.newBuilder()
                   .setContext(makeContext(storeType, backoffer.getSlowLog()))
                   .addAllKeys(codec.encodeKeys(keys))
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawBatchGetResponse> handler =
           new RegionErrorHandler<RawBatchGetResponse>(
@@ -1179,6 +1223,11 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
 
   public void rawBatchPut(
       BackOffer backOffer, List<KvPair> kvPairs, long ttl, boolean atomicForCAS) {
+    rawBatchPut(backOffer, kvPairs, ttl, atomicForCAS, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public void rawBatchPut(
+      BackOffer backOffer, List<KvPair> kvPairs, long ttl, boolean atomicForCAS, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1196,6 +1245,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setTtl(ttl)
                   .addTtls(ttl)
                   .setForCas(atomicForCAS)
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawBatchPutResponse> handler =
           new RegionErrorHandler<RawBatchPutResponse>(
@@ -1209,6 +1259,11 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   }
 
   public void rawBatchPut(BackOffer backOffer, Batch batch, long ttl, boolean atomicForCAS) {
+    rawBatchPut(backOffer, batch, ttl, atomicForCAS, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public void rawBatchPut(
+      BackOffer backOffer, Batch batch, long ttl, boolean atomicForCAS, String cf) {
     List<KvPair> pairs = new ArrayList<>();
     for (int i = 0; i < batch.getKeys().size(); i++) {
       pairs.add(
@@ -1217,11 +1272,11 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
               .setValue(batch.getValues().get(i))
               .build());
     }
-    rawBatchPut(backOffer, pairs, ttl, atomicForCAS);
+    rawBatchPut(backOffer, pairs, ttl, atomicForCAS, cf);
   }
 
   public void rawBatchWrite(
-      BackOffer backOffer, List<WriteOp> writeOps, long ttl, boolean atomicForCAS) {
+      BackOffer backOffer, List<WriteOp> writeOps, long ttl, boolean atomicForCAS, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1239,6 +1294,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setTtl(ttl)
                   .addTtls(ttl)
                   .setForCas(atomicForCAS)
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawBatchWriteResponse> handler =
           new RegionErrorHandler<>(
@@ -1251,8 +1307,9 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
     }
   }
 
-  public void rawBatchWrite(BackOffer backOffer, WriteBatch batch, long ttl, boolean atomicForCAS) {
-    rawBatchWrite(backOffer, batch.getWriteOps(), ttl, atomicForCAS);
+  public void rawBatchWrite(
+      BackOffer backOffer, WriteBatch batch, long ttl, boolean atomicForCAS, String cf) {
+    rawBatchWrite(backOffer, batch.getWriteOps(), ttl, atomicForCAS, cf);
   }
 
   private void handleRawBatchPut(RawBatchPutResponse resp) {
@@ -1284,6 +1341,11 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   }
 
   public void rawBatchDelete(BackOffer backoffer, List<ByteString> keys, boolean atomicForCAS) {
+    rawBatchDelete(backoffer, keys, atomicForCAS, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public void rawBatchDelete(
+      BackOffer backoffer, List<ByteString> keys, boolean atomicForCAS, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1299,6 +1361,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setContext(makeContext(storeType, backoffer.getSlowLog()))
                   .addAllKeys(codec.encodeKeys(keys))
                   .setForCas(atomicForCAS)
+                  .setCf(cf)
                   .build();
       RegionErrorHandler<RawBatchDeleteResponse> handler =
           new RegionErrorHandler<RawBatchDeleteResponse>(

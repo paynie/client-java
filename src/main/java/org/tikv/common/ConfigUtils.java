@@ -215,4 +215,6 @@ public class ConfigUtils {
   public static final int DEF_TIKV_SCAN_REGIONS_LIMIT = 1000;
 
   public static final int DEF_TIKV_API_VERSION = 1;
+
+  public static final String DEF_TIKV_DATA_CF = "default";
 }
