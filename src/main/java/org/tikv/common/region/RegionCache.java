@@ -145,9 +145,15 @@ public class RegionCache {
           logger.debug(String.format("invalidateRegion ID[%s]", region.getId()));
         }
         TiRegion oldRegion = regionCache.get(region.getId());
-        if (oldRegion != null && oldRegion == region) {
+        if (oldRegion != null && oldRegion.getId() == region.getId()) {
           keyToRegionIdCache.remove(makeRange(region.getStartKey(), region.getEndKey()));
           regionCache.remove(region.getId());
+        } else {
+          if (oldRegion == null) {
+            logger.warn("Can not find old region");
+          } else {
+            logger.warn("invalid region " + region + " failed" + ", old region " + oldRegion);
+          }
         }
       } catch (Exception ignore) {
       }
@@ -181,7 +187,9 @@ public class RegionCache {
           logger.debug(String.format("invalidateRegion ID[%s]", region.getId()));
         }
         TiRegion oldRegion = regionCache.get(region.getId());
-        if (!expected.getMeta().equals(oldRegion.getMeta())) {
+
+        // TODO: region
+        if (oldRegion != null && !expected.getMeta().equals(oldRegion.getMeta())) {
           return false;
         } else {
           if (oldRegion != null) {
@@ -192,7 +200,8 @@ public class RegionCache {
               makeRange(region.getStartKey(), region.getEndKey()), region.getId());
           return true;
         }
-      } catch (Exception ignore) {
+      } catch (Exception e) {
+        logger.warn("Update region failed, ", e);
         return false;
       }
     } finally {

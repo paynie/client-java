@@ -22,6 +22,7 @@ import static java.util.Objects.requireNonNull;
 import com.google.protobuf.ByteString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.tikv.common.ConfigUtils;
 import org.tikv.common.TiConfiguration;
 import org.tikv.common.exception.GrpcException;
 import org.tikv.common.exception.KeyException;
@@ -66,7 +67,7 @@ public class ConcreteScanIterator extends ScanIterator {
       ByteString endKey,
       long version,
       int limit) {
-    super(conf, builder, startKey, endKey, limit, false);
+    super(conf, builder, startKey, endKey, limit, false, ConfigUtils.DEF_TIKV_DATA_CF);
     this.version = version;
   }
 

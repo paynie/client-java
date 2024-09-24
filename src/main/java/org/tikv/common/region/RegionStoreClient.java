@@ -1016,6 +1016,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
   }
 
   public void rawDelete(BackOffer backOffer, ByteString key, boolean atomicForCAS) {
+    rawDelete(backOffer, key, atomicForCAS, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  public void rawDelete(BackOffer backOffer, ByteString key, boolean atomicForCAS, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1028,6 +1032,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                   .setContext(makeContext(storeType, backOffer.getSlowLog()))
                   .setKey(codec.encodeKey(key))
                   .setForCas(atomicForCAS)
+                  .setCf(cf)
                   .build();
 
       RegionErrorHandler<RawDeleteResponse> handler =
@@ -1398,7 +1403,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @return KvPair list
    */
   public List<KvPair> rawScan(BackOffer backOffer, ByteString key, int limit, boolean keyOnly) {
-    return rawScan(backOffer, key, ByteString.EMPTY, limit, keyOnly);
+    return rawScan(backOffer, key, ByteString.EMPTY, limit, keyOnly, ConfigUtils.DEF_TIKV_DATA_CF);
   }
 
   /**
@@ -1412,7 +1417,12 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @return KvPair list
    */
   public List<KvPair> rawScan(
-      BackOffer backOffer, ByteString start, ByteString end, int limit, boolean keyOnly) {
+      BackOffer backOffer,
+      ByteString start,
+      ByteString end,
+      int limit,
+      boolean keyOnly,
+      String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_scan", clusterId.toString()).startTimer();
@@ -1427,6 +1437,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
             Pair<ByteString, ByteString> range = codec.encodeRange(start, rangeEnd);
             return RawScanRequest.newBuilder()
                 .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                .setCf(cf)
                 .setStartKey(range.first)
                 .setEndKey(range.second)
                 .setKeyOnly(keyOnly)
@@ -1471,6 +1482,19 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @param endKey endKey
    */
   public void rawDeleteRange(BackOffer backOffer, ByteString startKey, ByteString endKey) {
+    rawDeleteRange(backOffer, startKey, endKey, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  /**
+   * Delete raw keys in the range of [startKey, endKey)
+   *
+   * @param backOffer BackOffer
+   * @param startKey startKey
+   * @param endKey endKey
+   * @param cf column family
+   */
+  public void rawDeleteRange(
+      BackOffer backOffer, ByteString startKey, ByteString endKey, String cf) {
     Long clusterId = pdClient.getClusterId();
     Histogram.Timer requestTimer =
         GRPC_RAW_REQUEST_LATENCY
@@ -1484,6 +1508,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
                 .setContext(makeContext(storeType, backOffer.getSlowLog()))
                 .setStartKey(range.first)
                 .setEndKey(range.second)
+                .setCf(cf)
                 .build();
           };
 

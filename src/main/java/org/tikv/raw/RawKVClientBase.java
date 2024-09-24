@@ -512,6 +512,7 @@ public interface RawKVClientBase extends AutoCloseable {
    *
    * @param prefixKey prefix key
    * @param keyOnly whether to scan in keyOnly mode
+   * @param keyOnly whether to scan in keyOnly mode
    * @return kvPairs with the specified prefix
    */
   List<Kvrpcpb.KvPair> scanPrefix(ByteString prefixKey, boolean keyOnly);

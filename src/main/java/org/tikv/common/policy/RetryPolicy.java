@@ -22,6 +22,8 @@ import io.grpc.Status;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Histogram;
 import java.util.concurrent.Callable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.tikv.common.exception.GrpcException;
 import org.tikv.common.log.SlowLogSpan;
 import org.tikv.common.operation.ErrorHandler;
@@ -30,6 +32,7 @@ import org.tikv.common.util.ConcreteBackOffer;
 import org.tikv.common.util.HistogramUtils;
 
 public abstract class RetryPolicy<RespT> {
+  private static final Logger logger = LoggerFactory.getLogger(RetryPolicy.class);
   BackOffer backOffer = ConcreteBackOffer.newCopNextMaxBackOff();
   public static final Histogram GRPC_SINGLE_REQUEST_LATENCY =
       HistogramUtils.buildDuration()

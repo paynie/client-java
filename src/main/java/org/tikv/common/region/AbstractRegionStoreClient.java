@@ -124,16 +124,20 @@ public abstract class AbstractRegionStoreClient
     // When switch leader fails or the region changed its region epoch,
     // it would be necessary to re-split task's key range for new region.
     if (!region.getRegionEpoch().equals(newRegion.getRegionEpoch())) {
+      logger.warn(
+          "region epoch = "
+              + region.getRegionEpoch()
+              + ", new region epoch = "
+              + newRegion.getRegionEpoch());
       return false;
     }
 
     // If we try one peer but find the leader has not changed, we do not need to try other peers.
-    if (region.getLeader().getStoreId() == newRegion.getLeader().getStoreId()) {
-      store = null;
+    if (region.getLeader().getStoreId() != newRegion.getLeader().getStoreId()) {
+      region = newRegion;
+      store = regionManager.getStoreById(region.getLeader().getStoreId(), backOffer);
+      updateClientStub();
     }
-    region = newRegion;
-    store = regionManager.getStoreById(region.getLeader().getStoreId(), backOffer);
-    updateClientStub();
     return true;
   }
 
@@ -318,35 +322,34 @@ public abstract class AbstractRegionStoreClient
             e);
       }
     }
+
     while (true) {
       try {
-        Thread.sleep(2);
+        Thread.sleep(100);
       } catch (InterruptedException e) {
         throw new GrpcException(e);
       }
-      List<SwitchLeaderTask> unfinished = new LinkedList<>();
+
+      boolean isAllFinished = true;
       for (SwitchLeaderTask task : responses) {
         if (!task.task.isDone()) {
-          unfinished.add(task);
+          isAllFinished = false;
           continue;
         }
         try {
           Kvrpcpb.RawGetResponse resp = task.task.get();
-          if (resp != null) {
-            if (!resp.hasRegionError()) {
-              // the peer is leader
-              logger.info(
-                  String.format("rawGet response indicates peer[%d] is leader", task.peer.getId()));
-              return task.peer;
-            }
+          if (resp != null && !resp.hasRegionError()) {
+            // the peer is leader
+            logger.info(
+                String.format("rawGet response indicates peer[%d] is leader", task.peer.getId()));
+            return task.peer;
           }
         } catch (Exception ignored) {
         }
       }
-      if (unfinished.isEmpty()) {
+      if (isAllFinished) {
         return null;
       }
-      responses = unfinished;
     }
   }
 

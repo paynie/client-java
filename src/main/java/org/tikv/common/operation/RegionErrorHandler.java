@@ -202,7 +202,7 @@ public class RegionErrorHandler<RespT> implements ErrorHandler<RespT> {
   // It returns whether retries the request because it's possible the region epoch is ahead of
   // TiKV's due to slow appling.
   private boolean onRegionEpochNotMatch(BackOffer backOffer, List<Metapb.Region> currentRegions) {
-    if (currentRegions.size() == 0) {
+    if (currentRegions == null || currentRegions.isEmpty()) {
       this.regionManager.onRegionStale(recv.getRegion());
       notifyRegionCacheInvalidate(recv.getRegion());
       return false;

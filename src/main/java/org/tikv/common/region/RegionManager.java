@@ -179,6 +179,7 @@ public class RegionManager {
             cache.putRegion(createRegion(regionAndLeader.first, regionAndLeader.second, backOffer));
       }
     } catch (Exception e) {
+      logger.error("Get region by key failed", e);
       return null;
     } finally {
       requestTimer.observeDuration();
@@ -326,7 +327,8 @@ public class RegionManager {
       return region;
     }
     TiRegion newRegion = region.switchPeer(storeId);
-    if (cache.updateRegion(region, newRegion)) {
+
+    if (newRegion != null && cache.updateRegion(region, newRegion)) {
       return newRegion;
     }
     // failed to switch leader, possibly region is outdated, we need to drop region cache from

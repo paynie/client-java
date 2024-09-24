@@ -123,10 +123,13 @@ public class StoreHealthyChecker implements Runnable {
         if (store.getProxyStore() != null) {
           TiStore newStore = store.withProxy(null);
           logger.warn(String.format("store [%s] recovers to be reachable", store.getAddress()));
-          if (cache.putStore(newStore.getId(), newStore)) {
-            this.taskQueue.add(newStore);
-            continue;
-          }
+          // if (cache.putStore(newStore.getId(), newStore)) {
+          //  this.taskQueue.add(newStore);
+          //  continue;
+          // }
+          cache.putStore(newStore.getId(), newStore);
+          this.taskQueue.add(newStore);
+          continue;
         } else {
           if (!store.isReachable()) {
             logger.warn(String.format("store [%s] recovers to be reachable", store.getAddress()));

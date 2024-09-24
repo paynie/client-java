@@ -44,13 +44,16 @@ public abstract class ScanIterator implements Iterator<Kvrpcpb.KvPair> {
   protected boolean hasEndKey;
   protected boolean processingLastBatch = false;
 
+  protected String cf;
+
   ScanIterator(
       TiConfiguration conf,
       RegionStoreClientBuilder builder,
       ByteString startKey,
       ByteString endKey,
       int limit,
-      boolean keyOnly) {
+      boolean keyOnly,
+      String cf) {
     this.startKey = requireNonNull(startKey, "start key is null");
     this.endKey = Key.toRawKey(requireNonNull(endKey, "end key is null"));
     this.hasEndKey = !endKey.isEmpty();
@@ -58,6 +61,7 @@ public abstract class ScanIterator implements Iterator<Kvrpcpb.KvPair> {
     this.keyOnly = keyOnly;
     this.conf = conf;
     this.builder = builder;
+    this.cf = cf;
   }
 
   public int getCurrentBatchSize() {

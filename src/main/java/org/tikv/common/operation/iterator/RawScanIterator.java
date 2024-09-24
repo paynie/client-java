@@ -39,8 +39,9 @@ public class RawScanIterator extends ScanIterator {
       ByteString endKey,
       int limit,
       boolean keyOnly,
-      BackOffer scanBackOffer) {
-    super(conf, builder, startKey, endKey, limit, keyOnly);
+      BackOffer scanBackOffer,
+      String cf) {
+    super(conf, builder, startKey, endKey, limit, keyOnly, cf);
 
     this.scanBackOffer = scanBackOffer;
   }
@@ -55,18 +56,15 @@ public class RawScanIterator extends ScanIterator {
         if (limit <= 0) {
           currentCache = null;
         } else {
-          try {
-            currentCache =
-                client.rawScan(backOffer, startKey, endKey.toByteString(), limit, keyOnly);
-            // Client will get the newest region during scan. So we need to
-            // update region after scan.
-            region = client.getRegion();
-          } catch (final TiKVException e) {
-            backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
-            continue;
-          }
+          currentCache =
+              client.rawScan(backOffer, startKey, endKey.toByteString(), limit, keyOnly, cf);
+          // Client will get the newest region during scan. So we need to
+          // update region after scan.
+          region = client.getRegion();
         }
         return region;
+      } catch (final TiKVException e) {
+        backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
       }
     }
   }
