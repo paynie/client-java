@@ -141,7 +141,7 @@ public class ConcreteBackOffer implements BackOffer {
     BackOffFunction backOffFunction = null;
     switch (funcType) {
       case BoUpdateLeader:
-        backOffFunction = BackOffFunction.create(10, 1000, BackOffStrategy.NoJitter);
+        backOffFunction = BackOffFunction.create(1, 10, BackOffStrategy.NoJitter);
         break;
       case BoTxnLockFast:
         backOffFunction = BackOffFunction.create(100, 3000, BackOffStrategy.EqualJitter);
@@ -153,7 +153,7 @@ public class ConcreteBackOffer implements BackOffer {
         backOffFunction =
             BackOffFunction.create(
                 TiConfiguration.getInt(TIKV_BO_REGION_MISS_BASE_IN_MS),
-                5000,
+                500,
                 BackOffStrategy.NoJitter);
         break;
       case BoTxnLock:
