@@ -21,7 +21,6 @@ import com.google.protobuf.ByteString;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.tikv.raw.RawKVClient;
 
 public class TimeoutTest extends MockThreeStoresTest {
   @Before

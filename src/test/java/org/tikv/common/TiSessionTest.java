@@ -35,7 +35,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.tikv.BaseRawKVTest;
 import org.tikv.common.region.TiRegion;
-import org.tikv.raw.RawKVClient;
 
 public class TiSessionTest extends BaseRawKVTest {
   private static final Logger logger = LoggerFactory.getLogger(TiSessionTest.class);

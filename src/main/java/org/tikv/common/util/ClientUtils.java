@@ -155,9 +155,51 @@ public class ClientUtils {
     return retryBatches;
   }
 
+  public static Map<TiRegion, List<ByteString>> groupKeysByRegionV2(
+      RegionManager regionManager, Set<ByteString> keys, BackOffer backoffer) {
+    Map<TiRegion, Integer> groupCounters = new HashMap<>();
+    int[] regionIds = new int[keys.size()];
+
+    TiRegion lastRegion = null;
+    int index = 0;
+    for (ByteString key : keys) {
+      if (lastRegion == null || !lastRegion.contains(key)) {
+        lastRegion = regionManager.getRegionByKey(key, backoffer);
+      }
+
+      if (!groupCounters.containsKey(lastRegion)) {
+        groupCounters.put(lastRegion, 0);
+      }
+      groupCounters.put(lastRegion, groupCounters.get(lastRegion) + 1);
+      regionIds[index++] = (int) lastRegion.getId();
+    }
+
+    Map<TiRegion, List<ByteString>> groups = new HashMap<>(groupCounters.size());
+    for (Map.Entry<TiRegion, Integer> counter : groupCounters.entrySet()) {
+      groups.put(counter.getKey(), new ArrayList<>(counter.getValue()));
+    }
+
+    index = 0;
+    for (ByteString key : keys) {
+      groups
+          .computeIfAbsent(regionManager.getRegionById(regionIds[index++]), k -> new ArrayList<>())
+          .add(key);
+    }
+
+    return groups;
+  }
+
   public static Map<TiRegion, List<ByteString>> groupKeysByRegion(
       RegionManager regionManager, Set<ByteString> keys, BackOffer backoffer) {
-    return groupKeysByRegion(regionManager, new ArrayList<>(keys), backoffer, true);
+    Map<TiRegion, List<ByteString>> groups = new HashMap<>();
+    TiRegion lastRegion = null;
+    for (ByteString key : keys) {
+      if (lastRegion == null || !lastRegion.contains(key)) {
+        lastRegion = regionManager.getRegionByKey(key, backoffer);
+      }
+      groups.computeIfAbsent(lastRegion, k -> new ArrayList<>()).add(key);
+    }
+    return groups;
   }
 
   public static Map<TiRegion, List<ByteString>> groupKeysByRegion(

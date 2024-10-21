@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,6 +55,14 @@ public class TiRegion implements Serializable {
   private final List<Peer> peers;
   private final List<TiStore> stores;
 
+  public long getTs() {
+    return ts;
+  }
+
+  private final long ts = System.currentTimeMillis();
+
+  private final AtomicBoolean needUpdate = new AtomicBoolean(false);
+
   public TiRegion(
       TiConfiguration conf, Region meta, Peer leader, List<Peer> peers, List<TiStore> stores) {
     this.conf = Objects.requireNonNull(conf, "conf is null");
@@ -81,6 +90,14 @@ public class TiRegion implements Serializable {
             .map(org.tikv.common.replica.Store::getPeer)
             .collect(Collectors.toList());
     replicaIdx = 0;
+  }
+
+  public boolean isNeedUpdate() {
+    return needUpdate.get();
+  }
+
+  public void needUpdate() {
+    needUpdate.set(true);
   }
 
   public TiConfiguration getConf() {

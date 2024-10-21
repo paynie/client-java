@@ -4,24 +4,12 @@ import java.util.List;
 import org.tikv.common.region.TiRegion;
 import org.tikv.kvproto.Kvrpcpb.WriteOp;
 
-public class WriteBatch {
-
-  private final BackOffer backOffer;
-  private final TiRegion region;
+public class WriteBatch extends RegionBatch {
   private final List<WriteOp> writeOps;
 
   public WriteBatch(BackOffer backOffer, TiRegion region, List<WriteOp> writeOps) {
-    this.backOffer = backOffer;
-    this.region = region;
+    super(ConcreteBackOffer.create(backOffer), region);
     this.writeOps = writeOps;
-  }
-
-  public BackOffer getBackOffer() {
-    return backOffer;
-  }
-
-  public TiRegion getRegion() {
-    return region;
   }
 
   public List<WriteOp> getWriteOps() {

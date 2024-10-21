@@ -122,6 +122,29 @@ public abstract class RetryPolicy<RespT> {
     }
   }
 
+  public RespT call(Callable<RespT> proc, String methodName, BackOffer backOffer) {
+    String[] labels = new String[] {methodName, backOffer.getClusterId().toString()};
+
+    // add single request duration histogram
+    Histogram.Timer requestTimer = GRPC_SINGLE_REQUEST_LATENCY.labels(labels).startTimer();
+    SlowLogSpan slowLogSpan = backOffer.getSlowLog().start("gRPC");
+    slowLogSpan.addProperty("method", methodName);
+
+    try {
+      return proc.call();
+    } catch (Exception e) {
+      Status status = Status.fromThrowable(e);
+      if (unrecoverableStatus.contains(status.getCode())) {
+        throw new GrpcException(e);
+      } else {
+        throw new RuntimeException(e);
+      }
+    } finally {
+      slowLogSpan.end();
+      requestTimer.observeDuration();
+    }
+  }
+
   public interface Builder<T> {
     RetryPolicy<T> create(ErrorHandler<T> handler);
   }

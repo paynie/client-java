@@ -127,6 +127,9 @@ public class ConfigUtils {
 
   public static final String TIKV_API_VERSION = "tikv.api_version";
 
+  public static final String TIKV_SERVER_HEARTBEAT_INTERVAL_MS =
+      "tikv.server.heartbeat.interval.ms";
+
   public static final String DEF_PD_ADDRESSES = "127.0.0.1:2379";
   public static final String DEF_TIMEOUT = "200ms";
   public static final String DEF_TIKV_GRPC_INGEST_TIMEOUT = "200s";
@@ -180,7 +183,7 @@ public class ConfigUtils {
   public static final int DEF_TIKV_RAWKV_SCAN_TIMEOUT_IN_MS = 10000;
   public static final int DEF_TIKV_RAWKV_CLEAN_TIMEOUT_IN_MS = 600000;
 
-  public static final int DEF_TIKV_BO_REGION_MISS_BASE_IN_MS = 20;
+  public static final int DEF_TIKV_BO_REGION_MISS_BASE_IN_MS = 10;
   public static final String DEF_TIKV_RAWKV_SCAN_SLOWLOG_IN_MS = "5000";
 
   public static final String NORMAL_COMMAND_PRIORITY = "NORMAL";
@@ -217,4 +220,6 @@ public class ConfigUtils {
   public static final int DEF_TIKV_API_VERSION = 1;
 
   public static final String DEF_TIKV_DATA_CF = "default";
+
+  public static final int DEF_TIKV_SERVER_HEARTBEAT_INTERVAL_MS = 1000;
 }

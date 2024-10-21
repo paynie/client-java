@@ -78,7 +78,6 @@ For example, if we want to put a `World` in `Hello` key in RawKV, write the foll
 ```java
 import org.tikv.common.TiConfiguration;
 import org.tikv.common.TiSession;
-import org.tikv.raw.RawKVClient;
 import org.tikv.shade.com.google.protobuf.ByteString;
 
 public class App {

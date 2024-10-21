@@ -20,7 +20,7 @@ package org.tikv.common;
 import static io.grpc.stub.ClientCalls.asyncBidiStreamingCall;
 import static io.grpc.stub.ClientCalls.blockingServerStreamingCall;
 
-import io.grpc.ManagedChannel;
+import io.grpc.Channel;
 import io.grpc.MethodDescriptor;
 import io.grpc.health.v1.HealthCheckRequest;
 import io.grpc.health.v1.HealthCheckResponse;
@@ -29,10 +29,12 @@ import io.grpc.stub.AbstractFutureStub;
 import io.grpc.stub.AbstractStub;
 import io.grpc.stub.ClientCalls;
 import io.grpc.stub.StreamObserver;
+import io.prometheus.client.Histogram;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.tikv.common.log.SlowLogSpan;
 import org.tikv.common.operation.ErrorHandler;
 import org.tikv.common.policy.RetryMaxMs.Builder;
 import org.tikv.common.policy.RetryPolicy;
@@ -98,6 +100,32 @@ public abstract class AbstractGRPCClient<
       logger.trace(String.format("leaving %s...", method.getFullMethodName()));
     }
     return resp;
+  }
+
+  public <ReqT, RespT> RespT call(
+      BackOffer backOffer, MethodDescriptor<ReqT, RespT> method, Supplier<ReqT> requestFactory) {
+    if (logger.isTraceEnabled()) {
+      logger.trace(String.format("Calling %s...", method.getFullMethodName()));
+    }
+
+    String methodName = method.getFullMethodName();
+    String[] labels =
+        new String[] {method.getFullMethodName(), backOffer.getClusterId().toString()};
+
+    // add single request duration histogram
+    Histogram.Timer requestTimer =
+        RetryPolicy.GRPC_SINGLE_REQUEST_LATENCY.labels(labels).startTimer();
+    SlowLogSpan slowLogSpan = backOffer.getSlowLog().start("gRPC");
+    slowLogSpan.addProperty("method", methodName);
+
+    try {
+      BlockingStubT stub = getBlockingStub();
+      return ClientCalls.blockingUnaryCall(
+          stub.getChannel(), method, stub.getCallOptions(), requestFactory.get());
+    } finally {
+      slowLogSpan.end();
+      requestTimer.observeDuration();
+    }
   }
 
   protected <ReqT, RespT> void callAsyncWithRetry(
@@ -185,7 +213,7 @@ public abstract class AbstractGRPCClient<
       backOffer.checkTimeout();
 
       try {
-        ManagedChannel channel = channelFactory.getChannel(addressStr, hostMapping);
+        Channel channel = channelFactory.getChannel(addressStr, hostMapping);
         HealthGrpc.HealthBlockingStub stub =
             HealthGrpc.newBlockingStub(channel)
                 .withDeadlineAfter(getTimeout(), TimeUnit.MILLISECONDS);

@@ -17,7 +17,7 @@
 
 package org.tikv.common.importer;
 
-import io.grpc.ManagedChannel;
+import io.grpc.Channel;
 import io.grpc.stub.StreamObserver;
 import java.util.List;
 import java.util.Objects;
@@ -214,7 +214,7 @@ public class ImporterStoreClient<RequestClass, ResponseClass>
       String addressStr = store.getStore().getAddress();
       logger.debug(String.format("Create region store client on address %s", addressStr));
 
-      ManagedChannel channel = channelFactory.getChannel(addressStr, pdClient.getHostMapping());
+      Channel channel = channelFactory.getChannel(addressStr, pdClient.getHostMapping());
       ImportSSTGrpc.ImportSSTBlockingStub blockingStub = ImportSSTGrpc.newBlockingStub(channel);
       ImportSSTGrpc.ImportSSTFutureStub asyncStub = ImportSSTGrpc.newFutureStub(channel);
       ImportSSTGrpc.ImportSSTStub stub = ImportSSTGrpc.newStub(channel);

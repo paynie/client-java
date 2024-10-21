@@ -19,6 +19,7 @@ package org.tikv.common.util;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
+import io.grpc.Channel;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.netty.GrpcSslContexts;
@@ -307,7 +308,7 @@ public class ChannelFactory implements AutoCloseable {
     }
   }
 
-  public ManagedChannel getChannel(String address, HostMapping mapping) {
+  public Channel getChannel(String address, HostMapping mapping) {
     return connPool
         .computeIfAbsent(
             address,
@@ -319,6 +320,19 @@ public class ChannelFactory implements AutoCloseable {
               return channels;
             })
         .get((int) (counter.incrementAndGet() % CHANNEL_SIZE));
+  }
+
+  public void closeChannel(String address) {
+    List<ManagedChannel> channels = connPool.remove(address);
+    if (channels != null) {
+      for (ManagedChannel channel : channels) {
+        try {
+          channel.shutdownNow();
+        } catch (Throwable e) {
+          // Ignore
+        }
+      }
+    }
   }
 
   private ManagedChannel initChannel(String addressStr, HostMapping hostMapping) {
@@ -353,8 +367,7 @@ public class ChannelFactory implements AutoCloseable {
               .maxInboundMessageSize(maxFrameSize)
               .keepAliveTime(keepaliveTime, TimeUnit.SECONDS)
               .keepAliveTimeout(keepaliveTimeout, TimeUnit.SECONDS)
-              .keepAliveWithoutCalls(true)
-              .idleTimeout(60, TimeUnit.SECONDS);
+              .keepAliveWithoutCalls(true);
 
       SslContext sslContext;
       try {

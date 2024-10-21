@@ -167,6 +167,8 @@ public class TiConfiguration implements Serializable {
     setIfMissing(TIKV_SCAN_REGIONS_LIMIT, DEF_TIKV_SCAN_REGIONS_LIMIT);
 
     setIfMissing(TIKV_API_VERSION, DEF_TIKV_API_VERSION);
+
+    setIfMissing(TIKV_SERVER_HEARTBEAT_INTERVAL_MS, DEF_TIKV_SERVER_HEARTBEAT_INTERVAL_MS);
   }
 
   public static void listAll() {
@@ -425,6 +427,16 @@ public class TiConfiguration implements Serializable {
   private int scanRegionsLimit = getInt(TIKV_SCAN_REGIONS_LIMIT);
 
   private ApiVersion apiVersion = ApiVersion.fromInt(getInt(TIKV_API_VERSION));
+
+  public int getTikvServerHbIntervalMs() {
+    return tikvServerHbIntervalMs;
+  }
+
+  public void setTikvServerHbIntervalMs(int tikvServerHbIntervalMs) {
+    this.tikvServerHbIntervalMs = tikvServerHbIntervalMs;
+  }
+
+  private int tikvServerHbIntervalMs = getInt(TIKV_SERVER_HEARTBEAT_INTERVAL_MS);
 
   public enum KVMode {
     TXN,

@@ -141,18 +141,30 @@ public class RegionCache {
     writeLock.lock();
     try {
       try {
-        if (logger.isDebugEnabled()) {
-          logger.debug(String.format("invalidateRegion ID[%s]", region.getId()));
-        }
         TiRegion oldRegion = regionCache.get(region.getId());
-        if (oldRegion != null && oldRegion.equals(region)) {
+        if (oldRegion != null && oldRegion.getMeta().equals(region.getMeta())) {
           keyToRegionIdCache.remove(makeRange(region.getStartKey(), region.getEndKey()));
           regionCache.remove(region.getId());
+          oldRegion.needUpdate();
+          logger.info(
+              String.format(
+                  "Invalid region {id: %d, leader: %d} success",
+                  region.getId(), region.getLeader().getStoreId()));
         } else {
           if (oldRegion == null) {
-            logger.warn("Can not find old region");
+            logger.warn(
+                String.format(
+                    "Invalid region {id: %d, leader: %d} failed, can not find region ",
+                    region.getId(), region.getLeader().getStoreId()));
           } else {
-            logger.warn("invalid region " + region + " failed" + ", old region " + oldRegion);
+            logger.warn(
+                String.format(
+                    "Invalid region {id: %d, leader: %d} failed, "
+                        + "old region is {id: %d, leader: %d}",
+                    region.getId(),
+                    region.getLeader().getStoreId(),
+                    oldRegion.getId(),
+                    oldRegion.getLeader().getStoreId()));
           }
         }
       } catch (Exception ignore) {
@@ -305,6 +317,17 @@ public class RegionCache {
       regionCache.clear();
     } finally {
       writeLock.unlock();
+    }
+  }
+
+  public List<TiStore> getAllStores() {
+    readLock.lock();
+    try {
+      List<TiStore> stores = new ArrayList<>(storeCache.size());
+      stores.addAll(storeCache.values());
+      return stores;
+    } finally {
+      readLock.unlock();
     }
   }
 }

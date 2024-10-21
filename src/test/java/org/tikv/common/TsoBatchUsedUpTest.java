@@ -21,7 +21,6 @@ import com.google.protobuf.ByteString;
 import org.junit.Assert;
 import org.junit.Test;
 import org.tikv.kvproto.Errorpb.Error;
-import org.tikv.raw.RawKVClient;
 
 public class TsoBatchUsedUpTest extends MockThreeStoresTest {
   RawKVClient createClient() {

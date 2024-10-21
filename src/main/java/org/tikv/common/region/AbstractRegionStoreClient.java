@@ -22,7 +22,8 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.ByteString;
-import io.grpc.ManagedChannel;
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
 import io.prometheus.client.Histogram;
@@ -205,17 +206,19 @@ public abstract class AbstractRegionStoreClient
       addressStr = store.getProxyStore().getAddress();
       deadline = conf.getForwardTimeout();
     }
-    ManagedChannel channel =
+    Channel channel =
         channelFactory.getChannel(addressStr, regionManager.getPDClient().getHostMapping());
-    blockingStub =
-        TikvGrpc.newBlockingStub(channel).withDeadlineAfter(deadline, TimeUnit.MILLISECONDS);
-    asyncStub = TikvGrpc.newFutureStub(channel).withDeadlineAfter(deadline, TimeUnit.MILLISECONDS);
+
     if (store.getProxyStore() != null) {
       Metadata header = new Metadata();
       header.put(TiConfiguration.FORWARD_META_DATA_KEY, store.getStore().getAddress());
-      blockingStub = MetadataUtils.attachHeaders(blockingStub, header);
-      asyncStub = MetadataUtils.attachHeaders(asyncStub, header);
+      channel =
+          ClientInterceptors.intercept(channel, MetadataUtils.newAttachHeadersInterceptor(header));
     }
+
+    blockingStub =
+        TikvGrpc.newBlockingStub(channel).withDeadlineAfter(deadline, TimeUnit.MILLISECONDS);
+    asyncStub = TikvGrpc.newFutureStub(channel).withDeadlineAfter(deadline, TimeUnit.MILLISECONDS);
   }
 
   private Boolean seekLeaderStore(BackOffer backOffer) {
@@ -302,7 +305,7 @@ public abstract class AbstractRegionStoreClient
       ByteString key = region.getStartKey();
       try {
         TiStore peerStore = regionManager.getStoreById(peer.getStoreId(), backOffer);
-        ManagedChannel channel =
+        Channel channel =
             channelFactory.getChannel(
                 peerStore.getAddress(), regionManager.getPDClient().getHostMapping());
         TikvGrpc.TikvFutureStub stub =
@@ -325,7 +328,7 @@ public abstract class AbstractRegionStoreClient
 
     while (true) {
       try {
-        Thread.sleep(10);
+        Thread.sleep(100);
       } catch (InterruptedException e) {
         throw new GrpcException(e);
       }
@@ -360,21 +363,26 @@ public abstract class AbstractRegionStoreClient
       ByteString key = region.getStartKey();
       try {
         TiStore peerStore = regionManager.getStoreById(peer.getStoreId(), backOffer);
-        ManagedChannel channel =
+        Channel channel =
             channelFactory.getChannel(
                 peerStore.getAddress(), regionManager.getPDClient().getHostMapping());
+
+        Metadata header = new Metadata();
+        header.put(TiConfiguration.FORWARD_META_DATA_KEY, store.getStore().getAddress());
+        channel =
+            ClientInterceptors.intercept(
+                channel, MetadataUtils.newAttachHeadersInterceptor(header));
+
         TikvGrpc.TikvFutureStub stub =
             TikvGrpc.newFutureStub(channel)
                 .withDeadlineAfter(forwardTimeout, TimeUnit.MILLISECONDS);
-        Metadata header = new Metadata();
-        header.put(TiConfiguration.FORWARD_META_DATA_KEY, store.getStore().getAddress());
+
         Kvrpcpb.RawGetRequest rawGetRequest =
             Kvrpcpb.RawGetRequest.newBuilder()
                 .setContext(makeContext())
                 .setKey(codec.encodeKey(key))
                 .build();
-        ListenableFuture<Kvrpcpb.RawGetResponse> task =
-            MetadataUtils.attachHeaders(stub, header).rawGet(rawGetRequest);
+        ListenableFuture<Kvrpcpb.RawGetResponse> task = stub.rawGet(rawGetRequest);
         responses.add(new ForwardCheckTask(task, peerStore.getStore()));
       } catch (Exception e) {
         logger.warn(

@@ -51,14 +51,13 @@ Or create a `RawKVClient` if you don't need the transaction semantic:
 ```java
 import org.tikv.common.TiConfiguration;
 import org.tikv.common.TiSession;
-import org.tikv.raw.RawKVClient;
 
 public class Main {
-	public static void main(String[] args) throws Exception {
-		TiConfiguration conf = TiConfiguration.createRawDefault(YOUR_PD_ADDRESSES);
-		TiSession session = TiSession.create(conf);
-		RawKVClient client = session.createRawClient();
-	}
+  public static void main(String[] args) throws Exception {
+    TiConfiguration conf = TiConfiguration.createRawDefault(YOUR_PD_ADDRESSES);
+    TiSession session = TiSession.create(conf);
+    RawKVClient client = session.createRawClient();
+  }
 }
 ```
 

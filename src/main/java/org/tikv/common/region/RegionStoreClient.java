@@ -27,7 +27,8 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.pingcap.tidb.tipb.DAGRequest;
 import com.pingcap.tidb.tipb.SelectResponse;
-import io.grpc.ManagedChannel;
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Metadata;
 import io.grpc.stub.MetadataUtils;
 import io.prometheus.client.Histogram;
@@ -192,7 +193,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
       if (logger.isDebugEnabled()) {
         logger.debug(String.format("Create region store client on address %s", addressStr));
       }
-      ManagedChannel channel = channelFactory.getChannel(addressStr, pdClient.getHostMapping());
+      Channel channel = channelFactory.getChannel(addressStr, pdClient.getHostMapping());
 
       TikvBlockingStub tikvBlockingStub = TikvGrpc.newBlockingStub(channel);
       TikvGrpc.TikvFutureStub tikvAsyncStub = TikvGrpc.newFutureStub(channel);
@@ -503,9 +504,6 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @return Return true means the rpc call success. Return false means the rpc call fail,
    *     RegionStoreClient should retry. Throw an Exception means the rpc call fail,
    *     RegionStoreClient cannot handle this kind of error
-   * @throws TiClientInternalException
-   * @throws RegionException
-   * @throws KeyException
    */
   private boolean isPrewriteSuccess(BackOffer backOffer, PrewriteResponse resp, long startTs)
       throws TiClientInternalException, KeyException, RegionException {
@@ -1322,6 +1320,7 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
       this.regionManager.onRequestFail(region);
       throw new TiClientInternalException("RawBatchPutResponse failed without a cause");
     }
+
     String error = resp.getError();
     if (!error.isEmpty()) {
       throw new KeyException(resp.getError());
@@ -1586,10 +1585,10 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
       if (logger.isDebugEnabled()) {
         logger.debug(String.format("Create region store client on address %s", addressStr));
       }
-      ManagedChannel channel = null;
+      Channel channel;
 
-      TikvBlockingStub blockingStub = null;
-      TikvFutureStub asyncStub = null;
+      TikvBlockingStub blockingStub;
+      TikvFutureStub asyncStub;
 
       if (conf.getEnableGrpcForward() && store.getProxyStore() != null && !store.isReachable()) {
         addressStr = store.getProxyStore().getAddress();
@@ -1597,8 +1596,11 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
             channelFactory.getChannel(addressStr, regionManager.getPDClient().getHostMapping());
         Metadata header = new Metadata();
         header.put(TiConfiguration.FORWARD_META_DATA_KEY, store.getStore().getAddress());
-        blockingStub = MetadataUtils.attachHeaders(TikvGrpc.newBlockingStub(channel), header);
-        asyncStub = MetadataUtils.attachHeaders(TikvGrpc.newFutureStub(channel), header);
+        channel =
+            ClientInterceptors.intercept(
+                channel, MetadataUtils.newAttachHeadersInterceptor(header));
+        blockingStub = TikvGrpc.newBlockingStub(channel);
+        asyncStub = TikvGrpc.newFutureStub(channel);
       } else {
         channel = channelFactory.getChannel(addressStr, pdClient.getHostMapping());
         blockingStub = TikvGrpc.newBlockingStub(channel);

@@ -49,6 +49,7 @@ import org.tikv.common.region.RegionManager;
 import org.tikv.common.region.RegionStoreClient;
 import org.tikv.common.region.TiRegion;
 import org.tikv.common.region.TiStore;
+import org.tikv.common.store.StoreClientManager;
 import org.tikv.common.util.BackOffFunction;
 import org.tikv.common.util.BackOffer;
 import org.tikv.common.util.ChannelFactory;
@@ -76,9 +77,18 @@ import org.tikv.txn.TxnKVClient;
 public class TiSession implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(TiSession.class);
   private static final Map<String, TiSession> sessionCachedMap = new HashMap<>();
+  private static final int MAX_SPLIT_REGION_STACK_DEPTH = 6;
+
+  static {
+    logger.info("Welcome to TiKV Java Client {}", getVersionInfo());
+  }
+
   private final TiConfiguration conf;
   private final RequestKeyCodec keyCodec;
   private final ChannelFactory channelFactory;
+  private final boolean enableGrpcForward;
+  private final MetricsServer metricsServer;
+  private final CircuitBreaker circuitBreaker;
   // below object creation is either heavy or making connection (pd), pending for lazy loading
   private volatile PDClient client;
   private volatile Catalog catalog;
@@ -90,34 +100,11 @@ public class TiSession implements AutoCloseable {
   private volatile ExecutorService batchScanThreadPool;
   private volatile ExecutorService deleteRangeThreadPool;
   private volatile RegionManager regionManager;
-  private final boolean enableGrpcForward;
+  private volatile StoreClientManager storeClientManager;
   private volatile RegionStoreClient.RegionStoreClientBuilder clientBuilder;
   private volatile ImporterStoreClient.ImporterStoreClientBuilder importerClientBuilder;
   private volatile boolean isClosed = false;
   private volatile SwitchTiKVModeClient switchTiKVModeClient;
-  private final MetricsServer metricsServer;
-  private final CircuitBreaker circuitBreaker;
-  private static final int MAX_SPLIT_REGION_STACK_DEPTH = 6;
-
-  static {
-    logger.info("Welcome to TiKV Java Client {}", getVersionInfo());
-  }
-
-  private static class VersionInfo {
-
-    private final String buildVersion;
-    private final String commitHash;
-
-    public VersionInfo(String buildVersion, String commitHash) {
-      this.buildVersion = buildVersion;
-      this.commitHash = commitHash;
-    }
-
-    @Override
-    public String toString() {
-      return buildVersion + "@" + commitHash;
-    }
-  }
 
   public TiSession(TiConfiguration conf) {
     // may throw org.tikv.common.MetricsServer  - http server not up
@@ -213,6 +200,25 @@ public class TiSession implements AutoCloseable {
   }
 
   @VisibleForTesting
+  public static TiSession create(TiConfiguration conf) {
+    return new TiSession(conf);
+  }
+
+  @Deprecated
+  public static TiSession getInstance(TiConfiguration conf) {
+    synchronized (sessionCachedMap) {
+      String key = conf.getPdAddrsString();
+      if (sessionCachedMap.containsKey(key)) {
+        return sessionCachedMap.get(key);
+      }
+
+      TiSession newSession = new TiSession(conf);
+      sessionCachedMap.put(key, newSession);
+      return newSession;
+    }
+  }
+
+  @VisibleForTesting
   public synchronized void warmUp() {
     long warmUpStartTime = System.nanoTime();
     BackOffer backOffer = ConcreteBackOffer.newRawKVBackOff(getPDClient().getClusterId());
@@ -270,28 +276,8 @@ public class TiSession implements AutoCloseable {
     }
   }
 
-  @VisibleForTesting
-  public static TiSession create(TiConfiguration conf) {
-    return new TiSession(conf);
-  }
-
-  @Deprecated
-  public static TiSession getInstance(TiConfiguration conf) {
-    synchronized (sessionCachedMap) {
-      String key = conf.getPdAddrsString();
-      if (sessionCachedMap.containsKey(key)) {
-        return sessionCachedMap.get(key);
-      }
-
-      TiSession newSession = new TiSession(conf);
-      sessionCachedMap.put(key, newSession);
-      return newSession;
-    }
-  }
-
   public RawKVClient createRawClient() {
     checkIsClosed();
-
     return new RawKVClient(this, this.getRegionStoreClientBuilder());
   }
 
@@ -418,6 +404,28 @@ public class TiSession implements AutoCloseable {
           regionManager = new RegionManager(getConf(), getPDClient(), this.channelFactory);
         }
         res = regionManager;
+      }
+    }
+    return res;
+  }
+
+  public StoreClientManager getStoreClientManager() {
+    checkIsClosed();
+
+    StoreClientManager res = storeClientManager;
+    if (res == null) {
+      synchronized (this) {
+        if (storeClientManager == null) {
+          storeClientManager =
+              new StoreClientManager(
+                  getPDClient().getClusterId(),
+                  getConf(),
+                  getChannelFactory(),
+                  getRegionManager(),
+                  getPDClient().getCodec(),
+                  getPDClient());
+        }
+        res = storeClientManager;
       }
     }
     return res;
@@ -794,6 +802,11 @@ public class TiSession implements AutoCloseable {
   private synchronized void shutdown(boolean now) throws Exception {
     if (!isClosed) {
       isClosed = true;
+
+      if (storeClientManager != null) {
+        storeClientManager.close();
+      }
+
       synchronized (sessionCachedMap) {
         sessionCachedMap.remove(conf.getPdAddrsString());
       }
@@ -876,5 +889,21 @@ public class TiSession implements AutoCloseable {
       }
     }
     return true;
+  }
+
+  private static class VersionInfo {
+
+    private final String buildVersion;
+    private final String commitHash;
+
+    public VersionInfo(String buildVersion, String commitHash) {
+      this.buildVersion = buildVersion;
+      this.commitHash = commitHash;
+    }
+
+    @Override
+    public String toString() {
+      return buildVersion + "@" + commitHash;
+    }
   }
 }

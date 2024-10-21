@@ -25,7 +25,6 @@ import org.tikv.common.KVMockServer.State;
 import org.tikv.kvproto.Metapb;
 import org.tikv.kvproto.Metapb.StoreState;
 import org.tikv.kvproto.Pdpb;
-import org.tikv.raw.RawKVClient;
 
 public class SeekLeaderStoreTest extends MockThreeStoresTest {
   private RawKVClient createClient() {

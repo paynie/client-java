@@ -8,10 +8,10 @@ Below is the basic usages of RawKV. See [API document] to see a full list of met
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+
 import org.tikv.common.TiConfiguration;
 import org.tikv.common.TiSession;
 import org.tikv.kvproto.Kvrpcpb;
-import org.tikv.raw.RawKVClient;
 import org.tikv.shade.com.google.protobuf.ByteString;
 
 public class Main {
@@ -34,8 +34,8 @@ public class Main {
 
     // batch get
     List<Kvrpcpb.KvPair> list = client.batchGet(new ArrayList<ByteString>() {{
-        add(ByteString.copyFromUtf8("k1"));
-        add(ByteString.copyFromUtf8("k3"));
+      add(ByteString.copyFromUtf8("k1"));
+      add(ByteString.copyFromUtf8("k3"));
     }});
     System.out.println(list);
 

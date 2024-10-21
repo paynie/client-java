@@ -26,7 +26,6 @@ import org.junit.Test;
 import org.tikv.common.region.TiRegion;
 import org.tikv.common.region.TiStore;
 import org.tikv.kvproto.Metapb;
-import org.tikv.raw.RawKVClient;
 
 public class RegionErrorTest extends MockThreeStoresTest {
   @Before

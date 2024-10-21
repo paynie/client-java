@@ -26,8 +26,6 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -66,13 +64,17 @@ public class RegionManager {
           .labelNames("cluster")
           .register();
 
+  public RegionCache getCache() {
+    return cache;
+  }
+
   // TODO: the region cache logic need rewrite.
   // https://github.com/pingcap/tispark/issues/1170
   private final RegionCache cache;
   private final ReadOnlyPDClient pdClient;
   private final TiConfiguration conf;
-  private final ScheduledExecutorService executor;
-  private final StoreHealthyChecker storeChecker;
+  // private final ScheduledExecutorService executor;
+  // private final StoreHealthyChecker storeChecker;
   private final CopyOnWriteArrayList<Function<CacheInvalidateEvent, Void>>
       cacheInvalidateCallbackList;
   private final ExecutorService callBackThreadPool;
@@ -92,8 +94,8 @@ public class RegionManager {
     this.cache = new RegionCache();
     this.pdClient = pdClient;
     this.conf = conf;
-    this.storeChecker = null;
-    this.executor = null;
+    // this.storeChecker = null;
+    // this.executor = null;
     this.cacheInvalidateCallbackList = new CopyOnWriteArrayList<>();
     this.callBackThreadPool = Executors.newFixedThreadPool(callBackExecutorThreadNum);
   }
@@ -106,21 +108,21 @@ public class RegionManager {
     this.cache = new RegionCache();
     this.pdClient = pdClient;
     this.conf = conf;
-    long period = conf.getHealthCheckPeriodDuration();
-    StoreHealthyChecker storeChecker =
-        new StoreHealthyChecker(
-            channelFactory, pdClient, this.cache, conf.getGrpcHealthCheckTimeout());
-    this.storeChecker = storeChecker;
-    this.executor = Executors.newScheduledThreadPool(1);
-    this.executor.scheduleAtFixedRate(storeChecker, period, period, TimeUnit.MILLISECONDS);
+    // long period = conf.getHealthCheckPeriodDuration();
+    // StoreHealthyChecker storeChecker =
+    //    new StoreHealthyChecker(
+    //        channelFactory, pdClient, this.cache, conf.getGrpcHealthCheckTimeout());
+    // this.storeChecker = storeChecker;
+    // this.executor = Executors.newScheduledThreadPool(1);
+    // this.executor.scheduleAtFixedRate(storeChecker, period, period, TimeUnit.MILLISECONDS);
     this.cacheInvalidateCallbackList = new CopyOnWriteArrayList<>();
     this.callBackThreadPool = Executors.newFixedThreadPool(callBackExecutorThreadNum);
   }
 
   public synchronized void close() {
-    if (this.executor != null) {
-      this.executor.shutdownNow();
-    }
+    // if (this.executor != null) {
+    //  this.executor.shutdownNow();
+    // }
     this.callBackThreadPool.shutdownNow();
   }
 
@@ -189,7 +191,6 @@ public class RegionManager {
     return region;
   }
 
-  @Deprecated
   // Do not use GetRegionByID when retrying request.
   //
   //   A,B |_______|_____|
@@ -227,34 +228,7 @@ public class RegionManager {
       throw new TiClientInternalException("Region invalid: " + region);
     }
 
-    TiStore store = null;
-    if (storeType == TiStoreType.TiKV) {
-      Peer peer = region.getCurrentReplica();
-      store = getStoreById(peer.getStoreId(), backOffer);
-    } else {
-      List<TiStore> tiflashStores = new ArrayList<>();
-      for (Peer peer : region.getLearnerList()) {
-        TiStore s = getStoreById(peer.getStoreId(), backOffer);
-        for (Metapb.StoreLabel label : s.getStore().getLabelsList()) {
-          if (label.getKey().equals(storeType.getLabelKey())
-              && label.getValue().equals(storeType.getLabelValue())) {
-            tiflashStores.add(s);
-          }
-        }
-      }
-      // select a tiflash with Round-Robin strategy
-      if (tiflashStores.size() > 0) {
-        store =
-            tiflashStores.get(
-                Math.floorMod(tiflashStoreIndex.getAndIncrement(), tiflashStores.size()));
-      }
-
-      if (store == null) {
-        // clear the region cache, so we may get the learner peer next time
-        cache.invalidateRegion(region);
-      }
-    }
-    return Pair.create(region, store);
+    return getStoreByRegion(region, storeType, backOffer);
   }
 
   public TiRegion createRegion(Metapb.Region region, BackOffer backOffer) {
@@ -295,9 +269,11 @@ public class RegionManager {
         logger.warn(String.format("store %d is tombstone", id));
         return null;
       }
-      if (cache.putStore(id, store) && storeChecker != null) {
-        storeChecker.scheduleStoreHealthCheck(store);
-      }
+
+      cache.putStore(id, store);
+      // if (cache.putStore(id, store) && storeChecker != null) {
+      //  storeChecker.scheduleStoreHealthCheck(store);
+      // }
       return store;
     } catch (Exception e) {
       throw new GrpcException(e);
@@ -337,10 +313,23 @@ public class RegionManager {
     return null;
   }
 
-  public synchronized void updateStore(TiStore oldStore, TiStore newStore) {
-    if (cache.updateStore(oldStore, newStore) && storeChecker != null) {
-      storeChecker.scheduleStoreHealthCheck(newStore);
+  public boolean updateLeader2(TiRegion region, long storeId) {
+    if (region.getLeader().getStoreId() == storeId) {
+      // Need not update, just return success
+      return true;
     }
+
+    // Switch leader
+    TiRegion newRegion = region.switchPeer(storeId);
+    // Update
+    return newRegion != null && cache.updateRegion(region, newRegion);
+  }
+
+  public synchronized void updateStore(TiStore oldStore, TiStore newStore) {
+    cache.updateStore(oldStore, newStore);
+    // if (cache.updateStore(oldStore, newStore) && storeChecker != null) {
+    //  storeChecker.scheduleStoreHealthCheck(newStore);
+    // }
   }
 
   /** Clears all cache when some unexpected error occurs. */
@@ -372,5 +361,57 @@ public class RegionManager {
   private BackOffer defaultBackOff() {
     return ConcreteBackOffer.newCustomBackOff(
         conf.getRawKVDefaultBackoffInMS(), pdClient.getClusterId());
+  }
+
+  public Pair<TiRegion, TiStore> getStoreByRegion(
+      TiRegion region, TiStoreType storeType, BackOffer backOffer) {
+    // logger.info(
+    //    String.format(
+    //        "In getStoreByRegion, region is {region id: %d, leader: %d}",
+    //        region.getId(), region.getLeader().getStoreId()));
+
+    if (region.isNeedUpdate()) {
+      // logger.info("===Need update");
+      region = getRegionById(region.getId());
+    }
+
+    TiStore store = null;
+    if (storeType == TiStoreType.TiKV) {
+      Peer peer = region.getLeader();
+      // logger.info(
+      //    "In getStoreByRegion, store peer is "
+      //        + peer.getStoreId()
+      //        + ", leader is "
+      //        + region.getLeader().getStoreId());
+      store = getStoreById(peer.getStoreId(), backOffer);
+    } else {
+      List<TiStore> tiflashStores = new ArrayList<>();
+      for (Peer peer : region.getLearnerList()) {
+        TiStore s = getStoreById(peer.getStoreId(), backOffer);
+        for (Metapb.StoreLabel label : s.getStore().getLabelsList()) {
+          if (label.getKey().equals(storeType.getLabelKey())
+              && label.getValue().equals(storeType.getLabelValue())) {
+            tiflashStores.add(s);
+          }
+        }
+      }
+      // select a tiflash with Round-Robin strategy
+      if (tiflashStores.size() > 0) {
+        store =
+            tiflashStores.get(
+                Math.floorMod(tiflashStoreIndex.getAndIncrement(), tiflashStores.size()));
+      }
+
+      if (store == null) {
+        // clear the region cache, so we may get the learner peer next time
+        cache.invalidateRegion(region);
+      }
+    }
+
+    return Pair.create(region, store);
+  }
+
+  public List<TiStore> getAllStores() {
+    return cache.getAllStores();
   }
 }

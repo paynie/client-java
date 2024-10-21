@@ -105,4 +105,12 @@ public class TiStore implements Serializable {
   public long getId() {
     return this.store.getId();
   }
+
+  public AtomicBoolean getReachable() {
+    return reachable;
+  }
+
+  public AtomicBoolean getValid() {
+    return valid;
+  }
 }

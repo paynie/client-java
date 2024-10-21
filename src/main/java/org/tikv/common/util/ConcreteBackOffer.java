@@ -141,7 +141,7 @@ public class ConcreteBackOffer implements BackOffer {
     BackOffFunction backOffFunction = null;
     switch (funcType) {
       case BoUpdateLeader:
-        backOffFunction = BackOffFunction.create(1, 10, BackOffStrategy.NoJitter);
+        backOffFunction = BackOffFunction.create(10, 100, BackOffStrategy.NoJitter);
         break;
       case BoTxnLockFast:
         backOffFunction = BackOffFunction.create(100, 3000, BackOffStrategy.EqualJitter);
