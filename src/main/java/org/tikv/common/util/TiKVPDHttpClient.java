@@ -86,24 +86,48 @@ public class TiKVPDHttpClient {
   }
 
   public void regionSplitEnable(boolean enable) throws IOException {
+    int maxRetryNum = 10;
+    int retryIntervalMs = 1000;
     IOException ioe = null;
-    for (String pd : pdAddrs) { // masters is not empty
-      try {
-        regionSplitEnable(pd, enable);
-        return;
-      } catch (IOException e) {
-        String log =
-            String.format(
-                "Set parameter %s to pd %s failed ", SCHEDULER_ENABLE_TIKV_SPLIT_REGION, pd);
-        LOG.error(log, e);
-        ioe = e;
-      } catch (Throwable te) {
-        String log =
-            String.format(
-                "Set parameter %s to pd %s failed ", SCHEDULER_ENABLE_TIKV_SPLIT_REGION, pd);
-        LOG.error(log, te);
-        ioe = new IOException(te);
+    for (int retryIndex = 0; retryIndex < maxRetryNum; retryIndex++) {
+      for (String pd : pdAddrs) { // masters is not empty
+        try {
+          regionSplitEnable(pd, enable);
+          boolean isEnable = isRegionSplitEnable();
+          if (isEnable == enable) {
+            // Set success
+            String log =
+                String.format(
+                    "Set parameter %s to %b success ", SCHEDULER_ENABLE_TIKV_SPLIT_REGION, enable);
+            LOG.info(log);
+            return;
+          }
+        } catch (IOException e) {
+          String log =
+              String.format(
+                  "Set parameter %s to pd %s failed ", SCHEDULER_ENABLE_TIKV_SPLIT_REGION, pd);
+          LOG.error(log, e);
+          ioe = e;
+        } catch (Throwable te) {
+          String log =
+              String.format(
+                  "Set parameter %s to pd %s failed ", SCHEDULER_ENABLE_TIKV_SPLIT_REGION, pd);
+          LOG.error(log, te);
+          ioe = new IOException(te);
+        }
       }
+
+      try {
+        Thread.sleep(retryIntervalMs);
+      } catch (InterruptedException e) {
+        LOG.error("Retry sleep is interrupt", e);
+      }
+    }
+
+    if (ioe == null) {
+      String log =
+          String.format("Set %s to %b failed ", SCHEDULER_ENABLE_TIKV_SPLIT_REGION, enable);
+      ioe = new IOException(log);
     }
 
     throw ioe;
@@ -309,8 +333,7 @@ public class TiKVPDHttpClient {
     }
 
     // Generate json string
-    String str = out.toString("UTF-8");
-    return str;
+    return out.toString("UTF-8");
   }
 
   public void close() {

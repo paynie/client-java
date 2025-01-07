@@ -66,15 +66,8 @@ import org.tikv.common.operation.iterator.ScanIterator;
 import org.tikv.common.region.RegionStoreClient;
 import org.tikv.common.region.RegionStoreClient.RegionStoreClientBuilder;
 import org.tikv.common.region.TiRegion;
-import org.tikv.common.util.BackOffFunction;
-import org.tikv.common.util.BackOffer;
-import org.tikv.common.util.Batch;
-import org.tikv.common.util.ConcreteBackOffer;
-import org.tikv.common.util.DeleteRange;
-import org.tikv.common.util.HistogramUtils;
-import org.tikv.common.util.Pair;
-import org.tikv.common.util.ScanOption;
-import org.tikv.common.util.WriteBatch;
+import org.tikv.common.util.*;
+import org.tikv.kvproto.Kvrpcpb;
 import org.tikv.kvproto.Kvrpcpb.KvPair;
 import org.tikv.kvproto.Kvrpcpb.WriteOp;
 
@@ -101,6 +94,7 @@ public class RawKVClient implements RawKVClientBase {
   public static final List<WriteBatch> EMPTY_WRITEBATCH_LIST = new ArrayList<>();
 
   public static final List<DeleteRange> EMPTY_DELETERANGE_LIST = new ArrayList<>();
+  public static final List<CoprocessorRange> EMPTY_COPROCESSORRANGE_LIST = new ArrayList<>();
   private static final Logger logger = LoggerFactory.getLogger(RawKVClient.class);
   private static final TiKVException ERR_MAX_SCAN_LIMIT_EXCEEDED =
       new TiKVException("limit should be less than MAX_RAW_SCAN_LIMIT");
@@ -115,6 +109,7 @@ public class RawKVClient implements RawKVClientBase {
   private final ExecutorService batchDeleteThreadPool;
   private final ExecutorService batchScanThreadPool;
   private final ExecutorService deleteRangeThreadPool;
+  private final ExecutorService coprocessorThreadPool;
 
   public RawKVClient(TiSession session, RegionStoreClientBuilder clientBuilder) {
     Objects.requireNonNull(session, "session is null");
@@ -127,6 +122,7 @@ public class RawKVClient implements RawKVClientBase {
     this.batchDeleteThreadPool = session.getThreadPoolForBatchDelete();
     this.batchScanThreadPool = session.getThreadPoolForBatchScan();
     this.deleteRangeThreadPool = session.getThreadPoolForDeleteRange();
+    this.coprocessorThreadPool = session.getThreadPoolForCoprocessor();
     this.atomicForCAS = conf.isEnableAtomicForCAS();
     this.clusterId = session.getPDClient().getClusterId();
     this.pdAddresses = session.getPDClient().getPdAddrs();
@@ -899,6 +895,217 @@ public class RawKVClient implements RawKVClientBase {
   public synchronized void deletePrefix(ByteString key, String cf) {
     ByteString endKey = Key.toRawKey(key).nextPrefix().toByteString();
     deleteRange(key, endKey, cf);
+  }
+
+  @Override
+  public List<ByteString> coprocessor(
+      ByteString request, ByteString startKey, ByteString endKey, String cf) {
+    String[] labels = withClusterId("client_raw_coprocessor_count");
+    Histogram.Timer requestTimer = RAW_REQUEST_LATENCY.labels(labels).startTimer();
+    SlowLog slowLog = withClusterInfo(new SlowLogImpl(conf.getRawKVBatchReadSlowLogInMS()));
+    SlowLogSpan span = slowLog.start("coprocessorCount");
+    ConcreteBackOffer backOffer =
+        ConcreteBackOffer.newDeadlineBackOff(
+            conf.getRawKVCoprocessorTimeoutInMS(), slowLog, clusterId);
+    try {
+      long deadline = System.currentTimeMillis() + conf.getRawKVCoprocessorTimeoutInMS();
+      List<ByteString> result =
+          doCoprocessorSend(backOffer, request, startKey, endKey, deadline, cf);
+      RAW_REQUEST_SUCCESS.labels(labels).inc();
+      return result;
+    } catch (Exception e) {
+      RAW_REQUEST_FAILURE.labels(labels).inc();
+      slowLog.setError(e);
+      throw e;
+    } finally {
+      requestTimer.observeDuration();
+      span.end();
+      slowLog.log();
+    }
+  }
+
+  @Override
+  public long count(ByteString startKey, ByteString endKey, String cf) {
+    String[] labels = withClusterId("client_raw_coprocessor_count");
+    Histogram.Timer requestTimer = RAW_REQUEST_LATENCY.labels(labels).startTimer();
+    SlowLog slowLog = withClusterInfo(new SlowLogImpl(conf.getRawKVBatchReadSlowLogInMS()));
+    SlowLogSpan span = slowLog.start("coprocessorCount");
+    ConcreteBackOffer backOffer =
+        ConcreteBackOffer.newDeadlineBackOff(
+            conf.getRawKVCoprocessorTimeoutInMS(), slowLog, clusterId);
+    try {
+      long deadline = System.currentTimeMillis() + conf.getRawKVCoprocessorTimeoutInMS();
+      List<Long> subResults = doCountSend(backOffer, startKey, endKey, deadline, cf);
+      RAW_REQUEST_SUCCESS.labels(labels).inc();
+      long result = 0;
+      for (long subResult : subResults) {
+        result += subResult;
+      }
+      return result;
+    } catch (Exception e) {
+      RAW_REQUEST_FAILURE.labels(labels).inc();
+      slowLog.setError(e);
+      throw e;
+    } finally {
+      requestTimer.observeDuration();
+      span.end();
+      slowLog.log();
+    }
+  }
+
+  private List<Long> doCountSend(
+      ConcreteBackOffer backOffer,
+      ByteString startKey,
+      ByteString endKey,
+      long deadline,
+      String cf) {
+    ExecutorCompletionService<Pair<List<CoprocessorRange>, List<Long>>> completionService =
+        new ExecutorCompletionService<>(coprocessorThreadPool);
+
+    List<Future<Pair<List<CoprocessorRange>, List<Long>>>> futureList = new ArrayList<>();
+
+    List<TiRegion> regions = fetchRegionsFromRange(backOffer, startKey, endKey);
+    List<CoprocessorRange> ranges = new ArrayList<>();
+    for (int i = 0; i < regions.size(); i++) {
+      TiRegion region = regions.get(i);
+      ByteString start = calcKeyByCondition(i == 0, startKey, region.getStartKey());
+      ByteString end = calcKeyByCondition(i == regions.size() - 1, endKey, region.getEndKey());
+      ranges.add(new CoprocessorRange(backOffer, region, start, end));
+    }
+    Queue<List<CoprocessorRange>> taskQueue = new LinkedList<>();
+    taskQueue.offer(ranges);
+    List<Long> results = new ArrayList<>(ranges.size());
+
+    while (!taskQueue.isEmpty()) {
+      List<CoprocessorRange> task = taskQueue.poll();
+      for (CoprocessorRange range : task) {
+        futureList.add(
+            completionService.submit(() -> doSendCountWithRetry(range.getBackOffer(), range, cf)));
+      }
+      try {
+        results.addAll(
+            getTasksWithOutput(
+                completionService, taskQueue, task, deadline - System.currentTimeMillis()));
+      } catch (Exception e) {
+        for (Future<Pair<List<CoprocessorRange>, List<Long>>> future : futureList) {
+          future.cancel(true);
+        }
+        throw e;
+      }
+    }
+
+    return results;
+  }
+
+  private Pair<List<CoprocessorRange>, List<Long>> doSendCountWithRetry(
+      BackOffer backOffer, CoprocessorRange range, String cf) {
+    try (RegionStoreClient client = clientBuilder.build(range.getRegion(), backOffer)) {
+      client.setTimeout(conf.getRawKVCoprocessorTimeoutInMS());
+
+      // Generate key range list
+      Kvrpcpb.KeyRange tikvRange =
+          Kvrpcpb.KeyRange.newBuilder()
+              .setStartKey(range.getStartKey())
+              .setEndKey(range.getEndKey())
+              .build();
+      List<Kvrpcpb.KeyRange> rangeList = new ArrayList<>(1);
+      rangeList.add(tikvRange);
+
+      // Count the results use coprocessor
+      long result = client.count(backOffer, rangeList, cf);
+      List<Long> resultList = new ArrayList<>(1);
+      resultList.add(result);
+      return Pair.create(EMPTY_COPROCESSORRANGE_LIST, resultList);
+    } catch (final TiKVException e) {
+      backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
+      clientBuilder.getRegionManager().invalidateRegion(range.getRegion());
+      logger.warn("ReSplitting ranges for BatchDeleteRangeRequest", e);
+
+      // retry
+      return doSendCountWithRetry(backOffer, range, cf);
+    }
+  }
+
+  private List<ByteString> doCoprocessorSend(
+      ConcreteBackOffer backOffer,
+      ByteString request,
+      ByteString startKey,
+      ByteString endKey,
+      long deadline,
+      String cf) {
+    ExecutorCompletionService<Pair<List<CoprocessorRange>, List<ByteString>>> completionService =
+        new ExecutorCompletionService<>(coprocessorThreadPool);
+
+    List<Future<Pair<List<CoprocessorRange>, List<ByteString>>>> futureList = new ArrayList<>();
+
+    List<TiRegion> regions = fetchRegionsFromRange(backOffer, startKey, endKey);
+    List<CoprocessorRange> ranges = new ArrayList<>();
+    for (int i = 0; i < regions.size(); i++) {
+      TiRegion region = regions.get(i);
+      ByteString start = calcKeyByCondition(i == 0, startKey, region.getStartKey());
+      ByteString end = calcKeyByCondition(i == regions.size() - 1, endKey, region.getEndKey());
+      ranges.add(new CoprocessorRange(backOffer, region, start, end));
+    }
+    Queue<List<CoprocessorRange>> taskQueue = new LinkedList<>();
+    taskQueue.offer(ranges);
+    List<ByteString> results = new ArrayList<>(ranges.size());
+
+    while (!taskQueue.isEmpty()) {
+      List<CoprocessorRange> task = taskQueue.poll();
+      for (CoprocessorRange range : task) {
+        futureList.add(
+            completionService.submit(
+                () -> doSendCoprocessorWithRetry(range.getBackOffer(), request, range, cf)));
+      }
+      try {
+        results.addAll(
+            getTasksWithOutput(
+                completionService, taskQueue, task, deadline - System.currentTimeMillis()));
+      } catch (Exception e) {
+        for (Future<Pair<List<CoprocessorRange>, List<ByteString>>> future : futureList) {
+          future.cancel(true);
+        }
+        throw e;
+      }
+    }
+
+    return results;
+  }
+
+  private Pair<List<CoprocessorRange>, List<ByteString>> doSendCoprocessorWithRetry(
+      BackOffer backOffer, ByteString reqeust, CoprocessorRange range, String cf) {
+    try (RegionStoreClient client = clientBuilder.build(range.getRegion(), backOffer)) {
+      client.setTimeout(conf.getRawKVCoprocessorTimeoutInMS());
+
+      // Generate key range list
+      Kvrpcpb.KeyRange tikvRange =
+          Kvrpcpb.KeyRange.newBuilder()
+              .setStartKey(range.getStartKey())
+              .setEndKey(range.getEndKey())
+              .build();
+      List<Kvrpcpb.KeyRange> rangeList = new ArrayList<>(1);
+      rangeList.add(tikvRange);
+
+      // Count the results use coprocessor
+      ByteString result =
+          client.rawCoprocessor(
+              backOffer,
+              CoprocessorUtils.COPROCESSOR_PLUGIN_NAME,
+              CoprocessorUtils.COPROCESSOR_PLUGIN_VERSION,
+              reqeust,
+              rangeList);
+
+      List<ByteString> resultList = new ArrayList<>(1);
+      resultList.add(result);
+      return Pair.create(EMPTY_COPROCESSORRANGE_LIST, resultList);
+    } catch (final TiKVException e) {
+      backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoRegionMiss, e);
+      clientBuilder.getRegionManager().invalidateRegion(range.getRegion());
+      logger.warn("ReSplitting ranges for BatchDeleteRangeRequest", e);
+
+      // retry
+      return doSendCoprocessorWithRetry(backOffer, reqeust, range, cf);
+    }
   }
 
   @Override

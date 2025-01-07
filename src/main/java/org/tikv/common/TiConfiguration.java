@@ -115,6 +115,7 @@ public class TiConfiguration implements Serializable {
     setIfMissing(TIKV_BATCH_DELETE_CONCURRENCY, DEF_BATCH_DELETE_CONCURRENCY);
     setIfMissing(TIKV_BATCH_SCAN_CONCURRENCY, DEF_BATCH_SCAN_CONCURRENCY);
     setIfMissing(TIKV_DELETE_RANGE_CONCURRENCY, DEF_DELETE_RANGE_CONCURRENCY);
+    setIfMissing(TIKV_COPROCESSOR_CONCURRENCY, DEF_COPROCESSOR_CONCURRENCY);
     setIfMissing(TIKV_REQUEST_COMMAND_PRIORITY, LOW_COMMAND_PRIORITY);
     setIfMissing(TIKV_REQUEST_ISOLATION_LEVEL, SNAPSHOT_ISOLATION_LEVEL);
     setIfMissing(TIKV_REQUEST_ISOLATION_LEVEL, SNAPSHOT_ISOLATION_LEVEL);
@@ -148,6 +149,7 @@ public class TiConfiguration implements Serializable {
     setIfMissing(TIKV_RAWKV_BATCH_WRITE_TIMEOUT_IN_MS, DEF_TIKV_RAWKV_BATCH_WRITE_TIMEOUT_IN_MS);
     setIfMissing(TIKV_RAWKV_SCAN_TIMEOUT_IN_MS, DEF_TIKV_RAWKV_SCAN_TIMEOUT_IN_MS);
     setIfMissing(TIKV_RAWKV_CLEAN_TIMEOUT_IN_MS, DEF_TIKV_RAWKV_CLEAN_TIMEOUT_IN_MS);
+    setIfMissing(TIKV_RAWKV_COPROCESSOR_TIMEOUT_IN_MS, DEF_TIKV_RAWKV_COPROCESSOR_TIMEOUT_IN_MS);
     setIfMissing(TIKV_BO_REGION_MISS_BASE_IN_MS, DEF_TIKV_BO_REGION_MISS_BASE_IN_MS);
     setIfMissing(TIKV_RAWKV_SCAN_SLOWLOG_IN_MS, DEF_TIKV_RAWKV_SCAN_SLOWLOG_IN_MS);
     setIfMissing(TiKV_CIRCUIT_BREAK_ENABLE, DEF_TiKV_CIRCUIT_BREAK_ENABLE);
@@ -346,6 +348,7 @@ public class TiConfiguration implements Serializable {
   private int batchDeleteConcurrency = getInt(TIKV_BATCH_DELETE_CONCURRENCY);
   private int batchScanConcurrency = getInt(TIKV_BATCH_SCAN_CONCURRENCY);
   private int deleteRangeConcurrency = getInt(TIKV_DELETE_RANGE_CONCURRENCY);
+  private int coprocessorConcurrency = getInt(TIKV_COPROCESSOR_CONCURRENCY);
   private CommandPri commandPriority = getCommandPri(TIKV_REQUEST_COMMAND_PRIORITY);
   private IsolationLevel isolationLevel = getIsolationLevel(TIKV_REQUEST_ISOLATION_LEVEL);
   private boolean showRowId = getBoolean(TIKV_SHOW_ROWID);
@@ -381,6 +384,7 @@ public class TiConfiguration implements Serializable {
   private int rawKVBatchWriteTimeoutInMS = getInt(TIKV_RAWKV_BATCH_WRITE_TIMEOUT_IN_MS);
   private int rawKVScanTimeoutInMS = getInt(TIKV_RAWKV_SCAN_TIMEOUT_IN_MS);
   private int rawKVCleanTimeoutInMS = getInt(TIKV_RAWKV_CLEAN_TIMEOUT_IN_MS);
+  private int rawKVCoprocessorTimeoutInMS = getInt(TIKV_RAWKV_COPROCESSOR_TIMEOUT_IN_MS);
   private Integer rawKVReadSlowLogInMS = getIntOption(TIKV_RAWKV_READ_SLOWLOG_IN_MS).orElse(null);
   private Integer rawKVWriteSlowLogInMS = getIntOption(TIKV_RAWKV_WRITE_SLOWLOG_IN_MS).orElse(null);
   private Integer rawKVBatchReadSlowLogInMS =
@@ -425,6 +429,14 @@ public class TiConfiguration implements Serializable {
   private int scanRegionsLimit = getInt(TIKV_SCAN_REGIONS_LIMIT);
 
   private ApiVersion apiVersion = ApiVersion.fromInt(getInt(TIKV_API_VERSION));
+
+  public int getRawKVCoprocessorTimeoutInMS() {
+    return rawKVCoprocessorTimeoutInMS;
+  }
+
+  public void setRawKVCoprocessorTimeoutInMS(int rawKVCoprocessorTimeoutInMS) {
+    this.rawKVCoprocessorTimeoutInMS = rawKVCoprocessorTimeoutInMS;
+  }
 
   public enum KVMode {
     TXN,
@@ -644,6 +656,15 @@ public class TiConfiguration implements Serializable {
 
   public int getDeleteRangeConcurrency() {
     return deleteRangeConcurrency;
+  }
+
+  public int getCoprocessorRangeConcurrency() {
+    return coprocessorConcurrency;
+  }
+
+  public TiConfiguration setCoprocessorRangeConcurrency(int coprocessorRangeConcurrency) {
+    this.coprocessorConcurrency = coprocessorRangeConcurrency;
+    return this;
   }
 
   public TiConfiguration setDeleteRangeConcurrency(int deleteRangeConcurrency) {

@@ -89,6 +89,7 @@ public class TiSession implements AutoCloseable {
   private volatile ExecutorService batchDeleteThreadPool;
   private volatile ExecutorService batchScanThreadPool;
   private volatile ExecutorService deleteRangeThreadPool;
+  private volatile ExecutorService coprocessorThreadPool;
   private volatile RegionManager regionManager;
   private final boolean enableGrpcForward;
   private volatile RegionStoreClient.RegionStoreClientBuilder clientBuilder;
@@ -567,6 +568,27 @@ public class TiSession implements AutoCloseable {
     return res;
   }
 
+  public ExecutorService getThreadPoolForCoprocessor() {
+    checkIsClosed();
+
+    ExecutorService res = coprocessorThreadPool;
+    if (res == null) {
+      synchronized (this) {
+        if (coprocessorThreadPool == null) {
+          coprocessorThreadPool =
+              Executors.newFixedThreadPool(
+                  conf.getDeleteRangeConcurrency(),
+                  new ThreadFactoryBuilder()
+                      .setNameFormat("coprocessor-thread-%d")
+                      .setDaemon(true)
+                      .build());
+        }
+        res = deleteRangeThreadPool;
+      }
+    }
+    return res;
+  }
+
   @VisibleForTesting
   public ChannelFactory getChannelFactory() {
     checkIsClosed();
@@ -610,7 +632,7 @@ public class TiSession implements AutoCloseable {
       int scatterWaitMS) {
     checkIsClosed();
 
-    if (splitKeys == null || splitKeys.size() == 0) {
+    if (splitKeys == null || splitKeys.isEmpty()) {
       logger.info("Split keys are empty, just return");
       return;
     }
