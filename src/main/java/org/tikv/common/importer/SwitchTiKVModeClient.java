@@ -68,7 +68,7 @@ public class SwitchTiKVModeClient {
     }
   }
 
-  private void switchTiKVToImportMode() {
+  public void switchTiKVToImportMode() {
     doSwitchTiKVMode(ImportSstpb.SwitchMode.Import);
   }
 
