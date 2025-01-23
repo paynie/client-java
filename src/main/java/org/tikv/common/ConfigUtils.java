@@ -40,6 +40,8 @@ public class ConfigUtils {
   public static final String TIKV_GRPC_KEEPALIVE_TIMEOUT = "tikv.grpc.keepalive_timeout";
   public static final String TIKV_GRPC_IDLE_TIMEOUT = "tikv.grpc.idle_timeout";
   public static final String TIKV_CONN_RECYCLE_TIME = "tikv.conn.recycle_time";
+  public static final String TIKV_COUNT_LIMIT = "tikv.count.limit";
+  public static final int DEF_TIKV_COUNT_LIMIT = 10000;
 
   public static final String TIKV_INDEX_SCAN_BATCH_SIZE = "tikv.index.scan_batch_size";
   public static final String TIKV_INDEX_SCAN_CONCURRENCY = "tikv.index.scan_concurrency";
@@ -50,6 +52,7 @@ public class ConfigUtils {
   public static final String TIKV_BATCH_DELETE_CONCURRENCY = "tikv.batch_delete_concurrency";
   public static final String TIKV_BATCH_SCAN_CONCURRENCY = "tikv.batch_scan_concurrency";
   public static final String TIKV_DELETE_RANGE_CONCURRENCY = "tikv.delete_range_concurrency";
+  public static final String TIKV_COPROCESSOR_CONCURRENCY = "tikv.coprocessor_concurrency";
 
   public static final String TIKV_REQUEST_COMMAND_PRIORITY = "tikv.request.command.priority";
   public static final String TIKV_REQUEST_ISOLATION_LEVEL = "tikv.request.isolation.level";
@@ -86,6 +89,8 @@ public class ConfigUtils {
       "tikv.rawkv.batch_write_timeout_in_ms";
   public static final String TIKV_RAWKV_SCAN_TIMEOUT_IN_MS = "tikv.rawkv.scan_timeout_in_ms";
   public static final String TIKV_RAWKV_CLEAN_TIMEOUT_IN_MS = "tikv.rawkv.clean_timeout_in_ms";
+  public static final String TIKV_RAWKV_COPROCESSOR_TIMEOUT_IN_MS =
+      "tikv.rawkv.coprocessor_timeout_in_ms";
   public static final String TIKV_BO_REGION_MISS_BASE_IN_MS = "tikv.bo_region_miss_base_in_ms";
   public static final String TIKV_RAWKV_READ_SLOWLOG_IN_MS = "tikv.rawkv.read_slowlog_in_ms";
   public static final String TIKV_RAWKV_WRITE_SLOWLOG_IN_MS = "tikv.rawkv.write_slowlog_in_ms";
@@ -156,8 +161,9 @@ public class ConfigUtils {
   public static final int DEF_BATCH_GET_CONCURRENCY = 20;
   public static final int DEF_BATCH_PUT_CONCURRENCY = 20;
   public static final int DEF_BATCH_DELETE_CONCURRENCY = 20;
-  public static final int DEF_BATCH_SCAN_CONCURRENCY = 5;
+  public static final int DEF_BATCH_SCAN_CONCURRENCY = 20;
   public static final int DEF_DELETE_RANGE_CONCURRENCY = 20;
+  public static final int DEF_COPROCESSOR_CONCURRENCY = 20;
   public static final Kvrpcpb.CommandPri DEF_COMMAND_PRIORITY = Kvrpcpb.CommandPri.Low;
   public static final Kvrpcpb.IsolationLevel DEF_ISOLATION_LEVEL = Kvrpcpb.IsolationLevel.SI;
   public static final boolean DEF_SHOW_ROWID = false;
@@ -182,7 +188,7 @@ public class ConfigUtils {
   public static final int DEF_TIKV_RAWKV_BATCH_WRITE_TIMEOUT_IN_MS = 2000;
   public static final int DEF_TIKV_RAWKV_SCAN_TIMEOUT_IN_MS = 10000;
   public static final int DEF_TIKV_RAWKV_CLEAN_TIMEOUT_IN_MS = 600000;
-
+  public static final int DEF_TIKV_RAWKV_COPROCESSOR_TIMEOUT_IN_MS = 600000;
   public static final int DEF_TIKV_BO_REGION_MISS_BASE_IN_MS = 10;
   public static final String DEF_TIKV_RAWKV_SCAN_SLOWLOG_IN_MS = "5000";
 

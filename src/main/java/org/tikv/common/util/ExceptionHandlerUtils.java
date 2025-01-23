@@ -92,7 +92,7 @@ public class ExceptionHandlerUtils {
     backOffer.doBackOff(BackOffFunction.BackOffFuncType.BoTiKVRPC, e);
 
     if (store != null) {
-      logger.error("rpc error for store " + store.getAddress());
+      logger.error("rpc error for store " + store.getAddress() + ", state = " + e.getStatus());
       if (e.getStatus() == Status.UNAVAILABLE) {
         // Store is unavailable
         storeClientManager.storeUnreachable(store);

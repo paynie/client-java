@@ -21,6 +21,7 @@ import com.google.protobuf.ByteString;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.tikv.common.ConfigUtils;
 import org.tikv.common.TiSession;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.ScanOption;
@@ -605,6 +606,19 @@ public interface RawKVClientBase extends AutoCloseable {
    * @param cf column family
    */
   void deletePrefix(ByteString key, String cf);
+
+  List<ByteString> coprocessor(
+      ByteString request, ByteString startKey, ByteString endKey, String cf);
+
+  default List<ByteString> coprocessor(ByteString request, ByteString startKey, ByteString endKey) {
+    return coprocessor(request, startKey, endKey, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  default long count(ByteString startKey, ByteString endKey) {
+    return count(startKey, endKey, ConfigUtils.DEF_TIKV_DATA_CF);
+  }
+
+  long count(ByteString startKey, ByteString endKey, String cf);
 
   /** Get the session of the current client */
   TiSession getSession();

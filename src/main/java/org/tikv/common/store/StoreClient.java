@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 import org.tikv.common.AbstractGRPCClient;
 import org.tikv.common.TiConfiguration;
 import org.tikv.common.apiversion.RequestKeyCodec;
+import org.tikv.common.exception.NeedRetryException;
 import org.tikv.common.exception.RawCASConflictException;
 import org.tikv.common.log.SlowLog;
 import org.tikv.common.operation.RegionErrorHandlerV2;
@@ -677,6 +678,105 @@ public class StoreClient
 
       Kvrpcpb.RawCASResponse resp = call(backOffer, TikvGrpc.getRawCompareAndSwapMethod(), factory);
       handler.handleResponse(backOffer, resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  public ByteString rawCoprocessor(
+      TiRegion region,
+      BackOffer backOffer,
+      String coporName,
+      String version,
+      ByteString serializedParams,
+      List<Kvrpcpb.KeyRange> ranges) {
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_coprocessor", clusterIdStr).startTimer();
+
+    try {
+      Supplier<Kvrpcpb.RawCoprocessorRequest> factory =
+          () ->
+              Kvrpcpb.RawCoprocessorRequest.newBuilder()
+                  .setContext(makeContext(region, storeType, backOffer.getSlowLog()))
+                  .setCoprName(coporName)
+                  .setCoprVersionReq(version)
+                  .setData(serializedParams)
+                  .addAllRanges(ranges)
+                  .build();
+
+      RegionErrorHandlerV2<Kvrpcpb.RawCoprocessorResponse> handler =
+          new RegionErrorHandlerV2<>(
+              regionManager,
+              new RegionErrorReceiverV2(region),
+              resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+
+      Kvrpcpb.RawCoprocessorResponse resp =
+          call(backOffer, TikvGrpc.getRawCoprocessorMethod(), factory);
+      handler.handleResponse(backOffer, resp);
+      return resp.getData();
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  public long rawCount(
+      TiRegion region, BackOffer backOffer, List<Kvrpcpb.KeyRange> ranges, String cf) {
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_count", clusterIdStr).startTimer();
+
+    try {
+      Supplier<Kvrpcpb.RawCountRequest> factory =
+          () ->
+              Kvrpcpb.RawCountRequest.newBuilder()
+                  .setContext(makeContext(region, storeType, backOffer.getSlowLog()))
+                  .addAllRanges(ranges)
+                  .setCf(cf)
+                  .setEachLimit(10000)
+                  .build();
+
+      RegionErrorHandlerV2<Kvrpcpb.RawCountResponse> handler =
+          new RegionErrorHandlerV2<>(
+              regionManager,
+              new RegionErrorReceiverV2(region),
+              resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+
+      Kvrpcpb.RawCountResponse resp = call(backOffer, TikvGrpc.getRawCountMethod(), factory);
+      handler.handleResponse(backOffer, resp);
+      return resp.getCount();
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  public Pair<Long, ByteString> rawCountV2(
+      TiRegion region, BackOffer backOffer, Kvrpcpb.KeyRange range, String cf, int limit) {
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY.labels("client_grpc_raw_count", clusterIdStr).startTimer();
+
+    try {
+      Supplier<Kvrpcpb.RawCountRequestV2> factory =
+          () ->
+              Kvrpcpb.RawCountRequestV2.newBuilder()
+                  .setContext(makeContext(region, storeType, backOffer.getSlowLog()))
+                  .setRange(range)
+                  .setCf(cf)
+                  .setEachLimit(limit)
+                  .build();
+
+      RegionErrorHandlerV2<Kvrpcpb.RawCountResponseV2> handler =
+          new RegionErrorHandlerV2<>(
+              regionManager,
+              new RegionErrorReceiverV2(region),
+              resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+
+      Kvrpcpb.RawCountResponseV2 resp = call(backOffer, TikvGrpc.getRawCountV2Method(), factory);
+      handler.handleResponse(backOffer, resp);
+
+      if (!resp.getError().isEmpty()) {
+        throw new NeedRetryException(resp.getError());
+      }
+
+      return Pair.create(resp.getCount(), resp.getLastKey());
     } finally {
       requestTimer.observeDuration();
     }

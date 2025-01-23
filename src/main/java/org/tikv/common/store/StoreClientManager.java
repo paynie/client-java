@@ -26,7 +26,7 @@ import org.tikv.kvproto.TikvGrpc;
 
 /** Store client manager */
 public class StoreClientManager {
-  public static final int HEARTBEAT_TIMEOUT_MS = 5000;
+  public static final int HEARTBEAT_TIMEOUT_MS = 60000;
   public static final int MAX_CHECK_STORE_TOMBSTONE_TICK = 60;
   public static final int LOCK_SLOT_NUMBER = 16;
   private static final Logger logger = LoggerFactory.getLogger(StoreClientManager.class);
@@ -216,8 +216,10 @@ public class StoreClientManager {
                 .withDeadlineAfter(HEARTBEAT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         HealthCheckRequest req = HealthCheckRequest.newBuilder().build();
         HealthCheckResponse resp = stub.check(req);
+        logger.info("checkStoreHealth for store " + addressStr + " response = " + resp);
         return resp.getStatus() == HealthCheckResponse.ServingStatus.SERVING;
       } catch (Exception e) {
+        logger.error("checkStoreHealth for store " + addressStr + " failed, ", e);
         return false;
       }
     }

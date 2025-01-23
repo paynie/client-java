@@ -338,6 +338,17 @@ public class SmartRawKVClient implements RawKVClientBase {
   public void deletePrefix(ByteString key, String cf) {}
 
   @Override
+  public List<ByteString> coprocessor(
+      ByteString request, ByteString startKey, ByteString endKey, String cf) {
+    return null;
+  }
+
+  @Override
+  public long count(ByteString startKey, ByteString endKey, String cf) {
+    return 0;
+  }
+
+  @Override
   public TiSession getSession() {
     return client.getSession();
   }

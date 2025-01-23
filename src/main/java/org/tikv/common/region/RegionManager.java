@@ -396,7 +396,7 @@ public class RegionManager {
         }
       }
       // select a tiflash with Round-Robin strategy
-      if (tiflashStores.size() > 0) {
+      if (!tiflashStores.isEmpty()) {
         store =
             tiflashStores.get(
                 Math.floorMod(tiflashStoreIndex.getAndIncrement(), tiflashStores.size()));

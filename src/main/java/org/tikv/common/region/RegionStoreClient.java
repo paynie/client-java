@@ -73,8 +73,7 @@ import org.tikv.common.util.HistogramUtils;
 import org.tikv.common.util.Pair;
 import org.tikv.common.util.RangeSplitter;
 import org.tikv.common.util.WriteBatch;
-import org.tikv.kvproto.Coprocessor;
-import org.tikv.kvproto.Errorpb;
+import org.tikv.kvproto.*;
 import org.tikv.kvproto.Kvrpcpb.BatchGetRequest;
 import org.tikv.kvproto.Kvrpcpb.BatchGetResponse;
 import org.tikv.kvproto.Kvrpcpb.CommitRequest;
@@ -96,6 +95,7 @@ import org.tikv.kvproto.Kvrpcpb.RawBatchWriteRequest;
 import org.tikv.kvproto.Kvrpcpb.RawBatchWriteResponse;
 import org.tikv.kvproto.Kvrpcpb.RawCASRequest;
 import org.tikv.kvproto.Kvrpcpb.RawCASResponse;
+import org.tikv.kvproto.Kvrpcpb.RawCountRequest;
 import org.tikv.kvproto.Kvrpcpb.RawDeleteRangeRequest;
 import org.tikv.kvproto.Kvrpcpb.RawDeleteRangeResponse;
 import org.tikv.kvproto.Kvrpcpb.RawDeleteRequest;
@@ -117,8 +117,6 @@ import org.tikv.kvproto.Kvrpcpb.SplitRegionResponse;
 import org.tikv.kvproto.Kvrpcpb.TxnHeartBeatRequest;
 import org.tikv.kvproto.Kvrpcpb.TxnHeartBeatResponse;
 import org.tikv.kvproto.Kvrpcpb.WriteOp;
-import org.tikv.kvproto.Metapb;
-import org.tikv.kvproto.TikvGrpc;
 import org.tikv.kvproto.TikvGrpc.TikvBlockingStub;
 import org.tikv.kvproto.TikvGrpc.TikvFutureStub;
 import org.tikv.txn.AbstractLockResolverClient;
@@ -225,6 +223,89 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
 
   public synchronized Set<Long> getResolvedLocks(Long version) {
     return resolvedLocks.getOrDefault(version, java.util.Collections.emptySet());
+  }
+
+  public ByteString rawCoprocessor(
+      BackOffer backOffer,
+      String coporName,
+      String version,
+      ByteString serializedParams,
+      List<Kvrpcpb.KeyRange> ranges) {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY.labels("client_coprocessor", clusterId.toString()).startTimer();
+    try {
+      Supplier<Kvrpcpb.RawCoprocessorRequest> factory =
+          () ->
+              Kvrpcpb.RawCoprocessorRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .setCoprName(coporName)
+                  .setCoprVersionReq(version)
+                  .setData(serializedParams)
+                  .addAllRanges(ranges)
+                  .build();
+
+      RegionErrorHandler<Kvrpcpb.RawCoprocessorResponse> handler =
+          new RegionErrorHandler<>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      Kvrpcpb.RawCoprocessorResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawCoprocessorMethod(), factory, handler);
+      return rawCoprocessorHelper(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  public long count(BackOffer backOffer, List<Kvrpcpb.KeyRange> ranges, String cf) {
+    Long clusterId = pdClient.getClusterId();
+    Histogram.Timer requestTimer =
+        GRPC_RAW_REQUEST_LATENCY.labels("client_coprocessor", clusterId.toString()).startTimer();
+    try {
+      Supplier<Kvrpcpb.RawCountRequest> factory =
+          () ->
+              RawCountRequest.newBuilder()
+                  .setContext(makeContext(storeType, backOffer.getSlowLog()))
+                  .addAllRanges(ranges)
+                  .setCf(cf)
+                  .setEachLimit(10000)
+                  .build();
+
+      RegionErrorHandler<Kvrpcpb.RawCountResponse> handler =
+          new RegionErrorHandler<>(
+              regionManager, this, resp -> resp.hasRegionError() ? resp.getRegionError() : null);
+      Kvrpcpb.RawCountResponse resp =
+          callWithRetry(backOffer, TikvGrpc.getRawCountMethod(), factory, handler);
+      return rawCountHelper(resp);
+    } finally {
+      requestTimer.observeDuration();
+    }
+  }
+
+  private long rawCountHelper(Kvrpcpb.RawCountResponse resp) {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawScanResponse failed without a cause");
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+
+    return resp.getCount();
+  }
+
+  private ByteString rawCoprocessorHelper(Kvrpcpb.RawCoprocessorResponse resp) {
+    if (resp == null) {
+      this.regionManager.onRequestFail(region);
+      throw new TiClientInternalException("RawScanResponse failed without a cause");
+    }
+    if (resp.hasRegionError()) {
+      throw new RegionException(resp.getRegionError());
+    }
+
+    if (resp.getError() != null && !resp.getError().isEmpty()) {
+      throw new TiKVException("Corpocessor handle failed " + resp.getError());
+    }
+    return resp.getData();
   }
 
   /**
@@ -504,6 +585,9 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
    * @return Return true means the rpc call success. Return false means the rpc call fail,
    *     RegionStoreClient should retry. Throw an Exception means the rpc call fail,
    *     RegionStoreClient cannot handle this kind of error
+   * @throws TiClientInternalException
+   * @throws RegionException
+   * @throws KeyException
    */
   private boolean isPrewriteSuccess(BackOffer backOffer, PrewriteResponse resp, long startTs)
       throws TiClientInternalException, KeyException, RegionException {
@@ -1320,7 +1404,6 @@ public class RegionStoreClient extends AbstractRegionStoreClient {
       this.regionManager.onRequestFail(region);
       throw new TiClientInternalException("RawBatchPutResponse failed without a cause");
     }
-
     String error = resp.getError();
     if (!error.isEmpty()) {
       throw new KeyException(resp.getError());

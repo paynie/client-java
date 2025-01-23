@@ -470,7 +470,7 @@
                 </executions>
             </plugin>
             <!-- Clean Plug-in -->
-            <plugin>
+            <!--plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-clean-plugin</artifactId>
                 <version>3.0.0</version>
@@ -481,7 +481,7 @@
                         </fileset>
                     </filesets>
                 </configuration>
-            </plugin>
+            </plugin-->
             <!--- Needs to shade Protobuf 3 since other projects might use other version -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

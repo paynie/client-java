@@ -99,12 +99,33 @@ public class TiSession implements AutoCloseable {
   private volatile ExecutorService batchDeleteThreadPool;
   private volatile ExecutorService batchScanThreadPool;
   private volatile ExecutorService deleteRangeThreadPool;
+  private volatile ExecutorService coprocessorThreadPool;
   private volatile RegionManager regionManager;
   private volatile StoreClientManager storeClientManager;
   private volatile RegionStoreClient.RegionStoreClientBuilder clientBuilder;
   private volatile ImporterStoreClient.ImporterStoreClientBuilder importerClientBuilder;
   private volatile boolean isClosed = false;
   private volatile SwitchTiKVModeClient switchTiKVModeClient;
+
+  static {
+    logger.info("Welcome to TiKV Java Client {}", getVersionInfo());
+  }
+
+  private static class VersionInfo {
+
+    private final String buildVersion;
+    private final String commitHash;
+
+    public VersionInfo(String buildVersion, String commitHash) {
+      this.buildVersion = buildVersion;
+      this.commitHash = commitHash;
+    }
+
+    @Override
+    public String toString() {
+      return buildVersion + "@" + commitHash;
+    }
+  }
 
   public TiSession(TiConfiguration conf) {
     // may throw org.tikv.common.MetricsServer  - http server not up
@@ -200,25 +221,6 @@ public class TiSession implements AutoCloseable {
   }
 
   @VisibleForTesting
-  public static TiSession create(TiConfiguration conf) {
-    return new TiSession(conf);
-  }
-
-  @Deprecated
-  public static TiSession getInstance(TiConfiguration conf) {
-    synchronized (sessionCachedMap) {
-      String key = conf.getPdAddrsString();
-      if (sessionCachedMap.containsKey(key)) {
-        return sessionCachedMap.get(key);
-      }
-
-      TiSession newSession = new TiSession(conf);
-      sessionCachedMap.put(key, newSession);
-      return newSession;
-    }
-  }
-
-  @VisibleForTesting
   public synchronized void warmUp() {
     long warmUpStartTime = System.nanoTime();
     BackOffer backOffer = ConcreteBackOffer.newRawKVBackOff(getPDClient().getClusterId());
@@ -276,8 +278,28 @@ public class TiSession implements AutoCloseable {
     }
   }
 
+  @VisibleForTesting
+  public static TiSession create(TiConfiguration conf) {
+    return new TiSession(conf);
+  }
+
+  @Deprecated
+  public static TiSession getInstance(TiConfiguration conf) {
+    synchronized (sessionCachedMap) {
+      String key = conf.getPdAddrsString();
+      if (sessionCachedMap.containsKey(key)) {
+        return sessionCachedMap.get(key);
+      }
+
+      TiSession newSession = new TiSession(conf);
+      sessionCachedMap.put(key, newSession);
+      return newSession;
+    }
+  }
+
   public RawKVClient createRawClient() {
     checkIsClosed();
+
     return new RawKVClient(this, this.getRegionStoreClientBuilder());
   }
 
@@ -575,6 +597,27 @@ public class TiSession implements AutoCloseable {
     return res;
   }
 
+  public ExecutorService getThreadPoolForCoprocessor() {
+    checkIsClosed();
+
+    ExecutorService res = coprocessorThreadPool;
+    if (res == null) {
+      synchronized (this) {
+        if (coprocessorThreadPool == null) {
+          coprocessorThreadPool =
+              Executors.newFixedThreadPool(
+                  conf.getDeleteRangeConcurrency(),
+                  new ThreadFactoryBuilder()
+                      .setNameFormat("coprocessor-thread-%d")
+                      .setDaemon(true)
+                      .build());
+        }
+        res = deleteRangeThreadPool;
+      }
+    }
+    return res;
+  }
+
   @VisibleForTesting
   public ChannelFactory getChannelFactory() {
     checkIsClosed();
@@ -618,7 +661,7 @@ public class TiSession implements AutoCloseable {
       int scatterWaitMS) {
     checkIsClosed();
 
-    if (splitKeys == null || splitKeys.size() == 0) {
+    if (splitKeys == null || splitKeys.isEmpty()) {
       logger.info("Split keys are empty, just return");
       return;
     }
@@ -889,21 +932,5 @@ public class TiSession implements AutoCloseable {
       }
     }
     return true;
-  }
-
-  private static class VersionInfo {
-
-    private final String buildVersion;
-    private final String commitHash;
-
-    public VersionInfo(String buildVersion, String commitHash) {
-      this.buildVersion = buildVersion;
-      this.commitHash = commitHash;
-    }
-
-    @Override
-    public String toString() {
-      return buildVersion + "@" + commitHash;
-    }
   }
 }
